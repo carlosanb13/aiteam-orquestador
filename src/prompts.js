@@ -1,8 +1,48 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { AGENTS } from './agents.js';
 import { loadConfig } from './config.js';
 import { CAPABILITY_IDS, agentCapabilities, capabilitiesText, describeRequires } from './capabilities.js';
 
 const agentNames = () => Object.fromEntries(Object.values(AGENTS).map((a) => [a.id, a.name]));
+
+// ---------------------------------------------------------------- Reglas del proyecto (AGENTS.md / CLAUDE.md)
+
+const RULE_FILES = ['AGENTS.md', 'CLAUDE.md'];
+// Archivos que el propio CLI ya carga por su cuenta: no se repiten en el prompt.
+const NATIVE_RULES = { claude: 'CLAUDE.md', codex: 'AGENTS.md' };
+
+/** Archivo de reglas del proyecto en `dir` (AGENTS.md o, si no hay, CLAUDE.md). */
+export function findProjectRules(dir) {
+  if (!dir) return null;
+  for (const name of RULE_FILES) {
+    const file = path.join(dir, name);
+    try {
+      if (fs.statSync(file).isFile()) return { name, file };
+    } catch {
+      /* no existe */
+    }
+  }
+  return null;
+}
+
+/** Bloque de contexto con las reglas del proyecto para `agentId`, o '' si no hay o el CLI ya las lee solo. */
+export function projectRules(dir, agentId) {
+  const cfg = loadConfig().projectRules ?? {};
+  if (cfg.enabled === false) return '';
+  const found = findProjectRules(dir);
+  if (!found || NATIVE_RULES[agentId] === found.name) return '';
+  let text;
+  try {
+    text = fs.readFileSync(found.file, 'utf8').trim();
+  } catch {
+    return '';
+  }
+  if (!text) return '';
+  const max = cfg.maxChars ?? 20_000;
+  if (text.length > max) text = `${text.slice(0, max)}\n…(recortado)`;
+  return `\nREGLAS DEL PROYECTO (${found.name}; síguelas mientras no contradigan estas instrucciones):\n${text}\n`;
+}
 
 const JSON_RULE = `Termina SIEMPRE tu respuesta con un bloque JSON válido delimitado exactamente así:
 <<<JSON
@@ -43,7 +83,7 @@ ${capabilitiesText(run.agents, agentNames())}
 
 ARCHIVOS DEL REPOSITORIO:
 ${files || '(repositorio vacío)'}
-
+${projectRules(run.repoPath, run.coordinator)}
 Puedes leer archivos del repositorio para entender el contexto, pero NO modifiques nada.
 
 Divide el objetivo en entre 2 y 8 subtareas concretas. Reglas:
@@ -98,7 +138,7 @@ ${planText(run)}
 
 TABLERO DE MENSAJES DEL EQUIPO:
 ${boardText(run, agentId)}
-${deps ? `\nTRABAJO PREVIO DEL QUE DEPENDES (ya está fusionado en tu copia):\n${deps}\n` : ''}
+${deps ? `\nTRABAJO PREVIO DEL QUE DEPENDES (ya está fusionado en tu copia):\n${deps}\n` : ''}${projectRules(run.worktrees?.[agentId]?.path ?? run.repoPath, agentId)}
 TU SUBTAREA AHORA: ${task.id} — ${task.title}
 ${task.description}
 

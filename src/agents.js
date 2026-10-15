@@ -89,6 +89,9 @@ function claudeArgs(mode, autonomy, model, session) {
   if (session?.id) args.push(session.resume ? '--resume' : '--session-id', session.id);
   if (mode === 'write') {
     args.push('--permission-mode', autonomy === 'full' ? 'bypassPermissions' : 'acceptEdits');
+  } else if (mode === 'plan' && autonomy === 'full') {
+    // Modo plan con control total: puede ejecutar comandos para analizar, pero no editar archivos.
+    args.push('--permission-mode', 'bypassPermissions', '--disallowedTools', 'Edit', 'Write', 'NotebookEdit');
   } else {
     args.push('--permission-mode', 'default', '--disallowedTools', 'Edit', 'Write', 'NotebookEdit');
   }
@@ -246,6 +249,9 @@ async function mockInvoke(agentId, { prompt, cwd, mode, onEvent }) {
     };
   }
   let json;
+  if (kind === 'compact') {
+    return { ok: true, text: `(simulación) Resumen hecho por ${agentId}: el usuario y el equipo han hablado de varios cambios en el proyecto.` };
+  }
   if (kind === 'chat') {
     if (mode === 'write' && cwd) fs.appendFileSync(path.join(cwd, `chat-demo-${agentId}.txt`), `${new Date().toISOString()}\n`);
     await wait(500 + Math.random() * 800);
@@ -301,7 +307,8 @@ async function mockInvoke(agentId, { prompt, cwd, mode, onEvent }) {
 
 /**
  * Invoca una IA en modo no interactivo.
- * mode: "read" (solo lectura) | "write" (puede editar en `cwd`).
+ * mode: "read" (solo lectura) | "plan" (solo lectura; con control total también puede ejecutar comandos para analizar)
+ *       | "write" (puede editar en `cwd`).
  * Devuelve { ok, text, error, sessionId, durationMs }.
  */
 // Cortes de red momentáneos: merecen un reintento con la misma IA antes de dar la tarea por fallida.
