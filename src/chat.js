@@ -22,6 +22,8 @@ const ALIASES = {
   gemini: 'gemini',
   google: 'gemini',
 };
+// Errores de sesión: la IA no podrá responder hasta que el usuario vuelva a iniciar sesión.
+const AUTH_ERROR = /IneligibleTier|authenticat|not logged in|login required|please log ?in|unauthori[sz]ed|401/i;
 const TEAM_ALIASES = new Set(['equipo', 'todos', 'team', 'all']);
 
 const short = (s, n = 160) => {
@@ -87,7 +89,7 @@ function transcript(messages) {
 }
 
 function chatPrompt(chat, agent, request, history, isNewSession, hop) {
-  const others = chat.agents.filter((a) => a !== agent);
+  const others = chat.agents.filter((a) => a !== agent && !chat.exhausted?.[a]);
   return `[[KIND:chat]] [[HOP:${hop}]]
 Eres @${agent} (${AGENTS[agent].name}) y formas parte de AITeam, un equipo de IAs que conversa en un chat compartido con el usuario y entre sí.
 
@@ -359,15 +361,16 @@ export class ChatManager extends EventEmitter {
         return;
       }
       const quota = QUOTA_ERROR.test(res.error ?? '');
-      if (quota) chat.exhausted[agent] = { reason: short(res.error, 300), at: new Date().toISOString() };
+      const auth = !quota && AUTH_ERROR.test(res.error ?? '');
+      if (quota || auth) chat.exhausted[agent] = { reason: short(res.error, 300), at: new Date().toISOString(), kind: quota ? 'quota' : 'auth' };
       this.addMessage(chat, {
         from: 'system',
         kind: 'error',
-        text: `${AGENTS[agent].name} ${quota ? 'se ha quedado sin cuota' : 'no pudo responder'}: ${short(res.error, 400)}`,
+        text: `${AGENTS[agent].name} ${quota ? 'se ha quedado sin cuota' : auth ? 'no tiene la sesión iniciada' : 'no pudo responder'}: ${short(res.error, 400)}`,
         meta: { activity },
       });
       // Relevo: si se quedó sin cuota, otra IA atiende la misma petición.
-      const alt = quota && !relayedFrom ? this.available(chat).find((a) => a !== agent) : null;
+      const alt = (quota || auth) && !relayedFrom ? this.available(chat).find((a) => a !== agent) : null;
       if (alt) {
         this.addMessage(chat, { from: 'system', kind: 'notice', text: `${AGENTS[alt].name} se encarga en su lugar.` });
         q.items.unshift({ agent: alt, request, hop, relayedFrom: agent });
@@ -382,14 +385,19 @@ export class ChatManager extends EventEmitter {
     };
     const changed = await G.commitAll(chat.worktree.path, `[${agent}] ${short(request.text, 60)}`);
     let stat = '';
-    if (changed) stat = (await G.git(chat.worktree.path, ['show', '--stat', '--format=', 'HEAD'], { allowFail: true })).stdout.trim();
+    let files = [];
+    if (changed) {
+      stat = (await G.git(chat.worktree.path, ['show', '--stat', '--format=', 'HEAD'], { allowFail: true })).stdout.trim();
+      const names = await G.git(chat.worktree.path, ['show', '--name-only', '--diff-filter=AM', '--format=', 'HEAD'], { allowFail: true });
+      files = names.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+    }
 
     const delegations = parseDelegations(res.text, chat.agents, agent);
     const reply = this.addMessage(chat, {
       from: agent,
       to: delegations.map((d) => d.to),
       text: res.text.trim() || '(sin texto)',
-      meta: { activity, changed, stat, durationMs: res.durationMs, replyTo: request.id, sessionReset: res.sessionReset ?? false },
+      meta: { activity, changed, stat, files, durationMs: res.durationMs, replyTo: request.id, sessionReset: res.sessionReset ?? false },
     });
     chat.sessions[agent].seen = chat.messages.length;
 

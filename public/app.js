@@ -624,7 +624,7 @@ function renderChatHead() {
   const chat = state.chat;
   const members = chat.agents
     .map((a) => {
-      const st = chat.exhausted?.[a] ? badge(['sin cuota', 'err']) : chat.working?.agent === a ? badge(['trabajando', 'run']) : '';
+      const st = chat.exhausted?.[a] ? badge([chat.exhausted[a].kind === 'auth' ? 'sin sesión' : 'sin cuota', 'err']) : chat.working?.agent === a ? badge(['trabajando', 'run']) : '';
       return `<span class="member">${agentTag(a)} ${st}</span>`;
     })
     .join('');
@@ -678,7 +678,16 @@ function messageHtml(m) {
   const a = agentInfo(m.from);
   const to = m.to?.length ? ` <span class="muted">→ ${m.to.map((t) => `<span style="color:${agentInfo(t).color}">@${esc(t)}</span>`).join(', ')}</span>` : '';
   const meta = m.meta ?? {};
+  const images = meta.changed ? messageFiles(meta).filter(isImage) : [];
   const extras = [
+    images.length
+      ? `<div class="thumbs">${images
+          .map((f) => {
+            const src = imgUrl(state.chat.worktree.path, f, m.id);
+            return `<figure class="thumb checker" title="Clic para ampliar"><img src="${src}" alt="${esc(f)}" loading="lazy" data-zoom="${src}" data-name="${esc(f)}" onerror="this.closest('figure').remove()" /><figcaption>${esc(f.split('/').pop())}</figcaption></figure>`;
+          })
+          .join('')}</div>`
+      : '',
     meta.changed ? `<details><summary>📝 Archivos cambiados</summary><pre class="output">${esc(meta.stat)}</pre></details>` : '',
     meta.activity?.length ? `<details><summary>Actividad (${meta.activity.length})</summary><div class="activity">${meta.activity.map((l) => `<div>${esc(l)}</div>`).join('')}</div></details>` : '',
   ].join('');
@@ -1056,6 +1065,21 @@ $('#filesTree').addEventListener('click', async (e) => {
   if (!file) return;
   const view = $('#fileView');
   view.hidden = false;
+  if (isImage(file)) {
+    const src = imgUrl(files.root, file);
+    view.innerHTML = `<div class="file-view-head"><code>${esc(file)}</code>
+        <span>${file.toLowerCase().endsWith('.svg') ? '<button class="small ghost" id="svgCode">Ver código</button>' : ''}
+        <button class="small ghost" id="fileViewClose">✕</button></span></div>
+      <div class="img-preview checker" title="Clic para ampliar"><img src="${src}" alt="${esc(file)}" data-zoom="${esc(src)}" data-name="${esc(file)}" /></div>`;
+    $('#fileViewClose').addEventListener('click', () => (view.hidden = true));
+    $('#svgCode')?.addEventListener('click', () => showFileCode(file));
+    return;
+  }
+  showFileCode(file);
+});
+
+async function showFileCode(file) {
+  const view = $('#fileView');
   view.innerHTML = '<p class="muted">Cargando…</p>';
   try {
     const f = await api('GET', `/api/fs/file?root=${encodeURIComponent(files.root)}&path=${encodeURIComponent(file)}`);
@@ -1070,6 +1094,43 @@ $('#filesTree').addEventListener('click', async (e) => {
   } catch (err) {
     view.innerHTML = `<p class="error">${esc(err.message)}</p>`;
   }
+}
+
+// ------------------------------------------------------------ imágenes
+
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|ico|bmp|avif)$/i;
+const isImage = (p) => IMAGE_EXT.test(p);
+const imgUrl = (root, p, v = Date.now()) => `/api/fs/image?root=${encodeURIComponent(root)}&path=${encodeURIComponent(p)}&v=${encodeURIComponent(v)}`;
+
+/** Archivos que tocó un mensaje: los guardados o, en mensajes antiguos, los que aparecen en el resumen de git. */
+function messageFiles(meta) {
+  if (Array.isArray(meta?.files)) return meta.files;
+  return String(meta?.stat ?? '')
+    .split('\n')
+    .map((l) => l.split('|')[0].trim())
+    .filter((f) => f && !/files? changed/.test(f));
+}
+
+const imgDlg = document.createElement('dialog');
+imgDlg.className = 'wide-dialog img-dialog';
+imgDlg.innerHTML = `<div class="dialog-head"><code id="imgName"></code>
+  <span><button class="small ghost" id="imgBg">Fondo claro</button> <button class="ghost" data-close>Cerrar</button></span></div>
+  <div class="img-stage checker" id="imgStage"><img id="imgBig" alt="" /></div>`;
+document.body.append(imgDlg);
+imgDlg.querySelector('[data-close]').addEventListener('click', () => imgDlg.close());
+imgDlg.addEventListener('click', (e) => e.target === imgDlg && imgDlg.close());
+$('#imgBg').addEventListener('click', (e) => {
+  const light = $('#imgStage').classList.toggle('light');
+  e.target.textContent = light ? 'Fondo oscuro' : 'Fondo claro';
+});
+
+// Cualquier imagen con data-zoom se amplía al hacer clic (explorador y chat).
+document.addEventListener('click', (e) => {
+  const img = e.target.closest('[data-zoom]');
+  if (!img) return;
+  $('#imgBig').src = img.dataset.zoom;
+  $('#imgName').textContent = img.dataset.name ?? '';
+  imgDlg.showModal();
 });
 
 // ------------------------------------------------------------ arranque

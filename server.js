@@ -107,6 +107,21 @@ const routes = [
     },
   ],
   ['GET', /^\/api\/fs\/tree$/, async (req, res, m, url) => send(res, 200, await Projects.listTree(url.searchParams.get('root'), allowedRoots()))],
+  [
+    'GET',
+    /^\/api\/fs\/image$/,
+    (req, res, m, url) => {
+      const img = Projects.readImage(url.searchParams.get('root'), url.searchParams.get('path'), allowedRoots());
+      // Las imágenes vienen de lo que generan las IAs: sin scripts ni recursos externos (importa en los SVG).
+      res.writeHead(200, {
+        'Content-Type': img.type,
+        'Cache-Control': 'no-store',
+        'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox",
+        'X-Content-Type-Options': 'nosniff',
+      });
+      res.end(img.data);
+    },
+  ],
   ['GET', /^\/api\/fs\/file$/, (req, res, m, url) => send(res, 200, Projects.readFile(url.searchParams.get('root'), url.searchParams.get('path'), allowedRoots()))],
   ['PATCH', /^\/api\/chats\/([\w-]+)$/, async (req, res, m) => send(res, 200, chats.update(m[1], await readBody(req)))],
   ['GET', /^\/api\/config$/, (req, res) => send(res, 200, loadConfig())],

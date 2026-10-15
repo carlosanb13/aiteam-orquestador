@@ -67,10 +67,37 @@ export async function listTree(root, allowedRoots) {
   return { root, files: files.slice(0, 5000), truncated: files.length > 5000, changed };
 }
 
-export function readFile(root, rel, allowedRoots) {
+export const IMAGE_TYPES = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.bmp': 'image/bmp',
+  '.avif': 'image/avif',
+};
+
+function resolveInside(root, rel, allowedRoots) {
   assertAllowed(root, allowedRoots);
   const full = path.resolve(root, rel);
-  if (!norm(full).startsWith(norm(root) + path.sep.toLowerCase()) && norm(full) !== norm(root)) throw new Error('Ruta no permitida.');
+  if (!norm(full).startsWith(norm(root) + path.sep.toLowerCase())) throw new Error('Ruta no permitida.');
+  return full;
+}
+
+/** Imagen tal cual, para mostrarla en la interfaz. */
+export function readImage(root, rel, allowedRoots) {
+  const full = resolveInside(root, rel, allowedRoots);
+  const type = IMAGE_TYPES[path.extname(full).toLowerCase()];
+  if (!type) throw new Error('No es una imagen.');
+  const stat = fs.statSync(full);
+  if (!stat.isFile() || stat.size > 20 * 1024 * 1024) throw new Error('Imagen no disponible.');
+  return { type, data: fs.readFileSync(full) };
+}
+
+export function readFile(root, rel, allowedRoots) {
+  const full = resolveInside(root, rel, allowedRoots);
   const stat = fs.statSync(full);
   if (!stat.isFile()) throw new Error('No es un archivo.');
   const buf = fs.readFileSync(full, { length: MAX_FILE_BYTES });
