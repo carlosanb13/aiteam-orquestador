@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Orchestrator } from './src/orchestrator.js';
 import { ChatManager } from './src/chat.js';
+import { snapshotRoutes } from './src/routes-snapshots.js';
 import * as G from './src/git.js';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
@@ -152,6 +153,7 @@ async function agentStatus(refresh = false) {
 }
 
 const routes = [
+  ...snapshotRoutes(chats, send, readBody),
   ['GET', /^\/api\/agents$/, async (req, res, _m, url) => send(res, 200, { mock: MOCK, agents: await agentStatus(url.searchParams.has('refresh')) })],
   ['POST', /^\/api\/agents$/, async (req, res) => {
     const agent = addCustomAgent(await readBody(req));

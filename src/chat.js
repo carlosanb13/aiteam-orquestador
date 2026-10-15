@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import * as G from './git.js';
+import * as Snapshots from './snapshots.js';
 import { AGENTS, invokeAgent } from './agents.js';
 import { DATA_DIR, loadConfig } from './config.js';
 import { killTree } from './runner.js';
@@ -355,17 +356,24 @@ export class ChatManager extends EventEmitter {
       this.emit('activity', { chatId: chat.id, agent, text });
     };
 
-    const res = await invokeAgent(agent, {
-      prompt: chatPrompt(chat, agent, req, isNew ? full : delta, isNew, hop),
-      fallbackPrompt: chatPrompt(chat, agent, req, full, true, hop),
-      cwd: chat.worktree.path,
-      mode: 'write',
-      autonomy: chat.autonomy ?? loadConfig().autonomy,
-      session,
-      onEvent,
-      onSpawn: (child) => (q.child = child),
-    });
-    q.child = null;
+    const snapshotId = await Snapshots.beforeTurn(chat);
+    let res;
+    try {
+      res = await invokeAgent(agent, {
+        prompt: chatPrompt(chat, agent, req, isNew ? full : delta, isNew, hop),
+        fallbackPrompt: chatPrompt(chat, agent, req, full, true, hop),
+        cwd: chat.worktree.path,
+        mode: 'write',
+        autonomy: chat.autonomy ?? loadConfig().autonomy,
+        session,
+        onEvent,
+        onSpawn: (child) => (q.child = child),
+      });
+    } finally {
+      q.child = null;
+      await Snapshots.afterTurn(chat, snapshotId);
+      this.save(chat);
+    }
 
     if (!res.ok) {
       if (res.cancelled || q.stopped) {
