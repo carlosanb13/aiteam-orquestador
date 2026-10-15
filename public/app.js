@@ -74,37 +74,8 @@ async function loadAgents(refresh = false) {
 }
 
 function renderChips() {
-  $('#agentChips').innerHTML = state.agents
-    .map((a) => {
-      const cls = !a.installed ? 'err' : a.working === true ? 'ok' : a.working === false ? 'err' : 'unk';
-      const title = !a.installed
-        ? 'CLI no instalado'
-        : a.working === false
-          ? `No responde: ${a.error ?? ''}`
-          : a.working === true
-            ? `Funciona (${a.version})`
-            : `Instalado (${a.version}). Pulsa "Probar" para comprobar la sesión.`;
-      return `<span class="chip" title="${esc(title)}">
-        <span class="dot ${cls}"></span><span style="color:${a.color};font-weight:600">${esc(a.name)}</span>
-        <button class="small ghost" data-test="${a.id}" ${a.installed ? '' : 'disabled'}>Probar</button>
-      </span>`;
-    })
-    .join('');
+  renderTeam();
 }
-
-$('#agentChips').addEventListener('click', async (e) => {
-  const id = e.target.dataset?.test;
-  if (!id) return;
-  e.target.disabled = true;
-  e.target.textContent = '…';
-  try {
-    const r = await api('POST', `/api/agents/${id}/test`);
-    Object.assign(agentInfo(id), r);
-  } catch (err) {
-    Object.assign(agentInfo(id), { working: false, error: err.message });
-  }
-  renderChips();
-});
 
 // ------------------------------------------------------------ historial
 
@@ -114,25 +85,8 @@ async function loadRuns() {
 }
 
 function renderRunList() {
-  const list = $('#runList');
-  if (!state.runs.length) {
-    list.innerHTML = '<li class="muted" style="cursor:default">Aún no hay tareas.</li>';
-    return;
-  }
-  list.innerHTML = state.runs
-    .map(
-      (r) => `<li data-id="${r.id}" class="${state.view === 'run' && state.current?.id === r.id ? 'active' : ''}">
-        <div class="goal">${esc(r.goal)}</div>
-        <div class="meta">${badge(STATUS[r.status] ?? [r.status, ''])} ${fmtDate(r.createdAt)}</div>
-      </li>`,
-    )
-    .join('');
+  renderSidebar();
 }
-
-$('#runList').addEventListener('click', (e) => {
-  const li = e.target.closest('li[data-id]');
-  if (li) openRun(li.dataset.id);
-});
 
 // ------------------------------------------------------------ nueva tarea
 
@@ -147,7 +101,7 @@ function agentPickHtml() {
     .join('');
 }
 
-function showNew() {
+function showNew(repo) {
   state.view = 'new';
   state.current = null;
   state.chat = null;
@@ -157,7 +111,7 @@ function showNew() {
   main.innerHTML = '';
   main.append($('#newRunTpl').content.cloneNode(true));
 
-  const lastRepo = localStorage.getItem('aiteam.repo');
+  const lastRepo = typeof repo === 'string' ? repo : localStorage.getItem('aiteam.repo');
   if (lastRepo) $('[name=repoPath]').value = lastRepo;
 
   $('[data-agent-pick]').innerHTML = agentPickHtml();
@@ -200,7 +154,6 @@ function showNew() {
   });
 }
 
-$('#newRunBtn').addEventListener('click', showNew);
 
 // ------------------------------------------------------------ vista de una tarea
 
@@ -342,6 +295,7 @@ function renderRun() {
         <div class="actions">
           ${badge(STATUS[run.status] ?? [run.status, ''])}
           ${awaiting ? '<button class="primary" id="approveBtn">Aprobar reparto y empezar</button>' : ''}
+          <button id="runFiles">Archivos</button>
           ${active ? '<button class="danger" id="cancelBtn">Cancelar</button>' : ''}
           ${!active && Object.keys(run.worktrees).length && !run.cleaned ? '<button id="cleanupBtn" title="Borra las carpetas de trabajo; las ramas se conservan">Limpiar copias</button>' : ''}
         </div>
@@ -381,6 +335,11 @@ function renderRun() {
     }
   });
   $('#runDiff')?.addEventListener('click', () => showDiff(`/api/runs/${run.id}/diff`));
+  $('#runFiles')?.addEventListener('click', () =>
+    run.integration?.worktree && !run.cleaned
+      ? openFiles(run.integration.worktree, 'resultado integrado')
+      : openFiles(run.repoPath, 'proyecto original'),
+  );
   $('#cancelBtn')?.addEventListener('click', async () => {
     if (confirm('¿Cancelar esta tarea? Se detendrán las IAs que estén trabajando.')) await api('POST', `/api/runs/${run.id}/cancel`);
   });
@@ -510,25 +469,8 @@ async function loadChats() {
 }
 
 function renderChatList() {
-  const list = $('#chatList');
-  if (!state.chats.length) {
-    list.innerHTML = '<li class="muted" style="cursor:default">Aún no hay conversaciones.</li>';
-    return;
-  }
-  list.innerHTML = state.chats
-    .map(
-      (c) => `<li data-id="${c.id}" class="${state.view === 'chat' && state.chat?.id === c.id ? 'active' : ''}">
-        <div class="goal">${esc(c.title)}</div>
-        <div class="meta">${c.working ? badge([`${agentInfo(c.working.agent).name} trabajando`, 'run']) : ''} ${fmtDate(c.updatedAt ?? c.createdAt)}</div>
-      </li>`,
-    )
-    .join('');
+  renderSidebar();
 }
-
-$('#chatList').addEventListener('click', (e) => {
-  const li = e.target.closest('li[data-id]');
-  if (li) openChat(li.dataset.id);
-});
 
 function showNewChat() {
   state.view = 'newChat';
@@ -562,7 +504,6 @@ function showNewChat() {
   });
 }
 
-$('#newChatBtn').addEventListener('click', showNewChat);
 
 /** Markdown mínimo: bloques de código, `código`, **negrita** y menciones. */
 function md(text) {
@@ -666,11 +607,28 @@ function renderChatHead() {
     </div>
     <div class="actions">
       ${chat.working ? '<button class="danger" id="chatStop">Detener</button>' : ''}
+      <select id="chatAutonomy" title="Qué pueden hacer las IAs en esta conversación">
+        <option value="edits" ${(chat.autonomy ?? state.defaultAutonomy) === 'edits' ? 'selected' : ''}>🔒 Modo seguro</option>
+        <option value="full" ${(chat.autonomy ?? state.defaultAutonomy) === 'full' ? 'selected' : ''}>⚡ Control total</option>
+      </select>
+      <button id="chatFiles">Archivos</button>
       <button id="chatDiff">Ver cambios</button>
       <button class="ghost" id="chatDelete" title="Borra la conversación y su copia de trabajo (la rama se conserva)">Eliminar</button>
     </div>`;
   $('#chatStop')?.addEventListener('click', () => api('POST', `/api/chats/${chat.id}/stop`));
   $('#chatDiff').addEventListener('click', () => showDiff(`/api/chats/${chat.id}/diff`));
+  $('#chatFiles').addEventListener('click', () => openFiles(chat.worktree.path, 'copia de la conversación'));
+  $('#chatAutonomy').addEventListener('change', async (e) => {
+    const value = e.target.value;
+    if (
+      value === 'full' &&
+      !confirm('Con "Control total" las IAs pueden ejecutar cualquier comando en tu PC (instalar programas, lanzar servidores, borrar archivos…) sin pedirte permiso. ¿Activarlo en esta conversación?')
+    ) {
+      e.target.value = 'edits';
+      return;
+    }
+    await api('PATCH', `/api/chats/${chat.id}`, { autonomy: value });
+  });
   $('#chatDelete').addEventListener('click', async () => {
     if (!confirm('¿Eliminar esta conversación? Se borra su copia de trabajo; la rama git se conserva.')) return;
     await api('DELETE', `/api/chats/${chat.id}`);
@@ -797,11 +755,300 @@ events.addEventListener('chat-removed', (e) => {
   renderChatList();
 });
 
+// ------------------------------------------------------------ proyectos (barra lateral)
+
+state.projects = [];
+state.usage = null;
+const normPath = (p) => String(p ?? '').replace(/\//g, '\\').toLowerCase();
+const collapsed = new Set(JSON.parse(localStorage.getItem('aiteam.collapsed') ?? '[]'));
+
+async function loadProjects() {
+  state.projects = await api('GET', '/api/projects');
+  renderSidebar();
+}
+
+function usableAgents() {
+  return state.agents.filter((a) => a.installed && a.enabled !== false && a.working !== false).map((a) => a.id);
+}
+
+function renderSidebar() {
+  const tree = $('#projectTree');
+  if (!tree) return;
+  // Proyectos guardados + los que aparezcan en conversaciones o tareas nuevas.
+  const paths = new Map(state.projects.map((p) => [normPath(p.path), p]));
+  for (const item of [...state.chats, ...state.runs]) {
+    if (item.repoPath && !paths.has(normPath(item.repoPath))) {
+      paths.set(normPath(item.repoPath), { path: item.repoPath, name: item.repoPath.split(/[\\/]/).pop() });
+    }
+  }
+  if (!paths.size) {
+    tree.innerHTML = '<p class="muted small-text" style="padding:0 6px">Añade la carpeta de un proyecto para empezar.</p>';
+    return;
+  }
+  tree.innerHTML = [...paths.values()]
+    .map((p) => {
+      const key = normPath(p.path);
+      const chats = state.chats.filter((c) => normPath(c.repoPath) === key);
+      const runs = state.runs.filter((r) => normPath(r.repoPath) === key);
+      const open = !collapsed.has(key);
+      const items = [
+        ...chats.map(
+          (c) => `<li data-chat="${c.id}" class="${state.view === 'chat' && state.chat?.id === c.id ? 'active' : ''}">
+            <span class="ico">💬</span><span class="label">${esc(c.title)}</span>
+            ${c.working ? `<span class="dot pulse" style="background:${agentInfo(c.working.agent).color}" title="${esc(agentInfo(c.working.agent).name)} trabajando"></span>` : ''}
+          </li>`,
+        ),
+        ...runs.map(
+          (r) => `<li data-run="${r.id}" class="${state.view === 'run' && state.current?.id === r.id ? 'active' : ''}">
+            <span class="ico">⚡</span><span class="label">${esc(r.goal)}</span>${badge(STATUS[r.status] ?? [r.status, ''])}
+          </li>`,
+        ),
+      ].join('');
+      return `<div class="project">
+        <div class="project-head" data-toggle="${esc(key)}" title="${esc(p.path)}">
+          <span class="caret">${open ? '▾' : '▸'}</span>
+          <span class="project-name">${esc(p.name)}</span>
+          <span class="project-actions">
+            <button class="small ghost" data-new-chat="${esc(p.path)}" title="Nueva conversación">💬+</button>
+            <button class="small ghost" data-new-run="${esc(p.path)}" title="Nueva tarea de equipo (en paralelo)">⚡+</button>
+            <button class="small ghost" data-files="${esc(p.path)}" title="Ver archivos">📁</button>
+          </span>
+        </div>
+        ${open ? `<ul class="run-list">${items || '<li class="muted small-text" style="cursor:default">Sin conversaciones todavía.</li>'}</ul>` : ''}
+      </div>`;
+    })
+    .join('');
+}
+
+$('#projectTree').addEventListener('click', async (e) => {
+  const t = e.target.closest('[data-new-chat],[data-new-run],[data-files],[data-toggle],[data-chat],[data-run]');
+  if (!t) return;
+  e.stopPropagation();
+  if (t.dataset.newChat) return newChatFor(t.dataset.newChat, t);
+  if (t.dataset.newRun) return showNew(t.dataset.newRun);
+  if (t.dataset.files) return openFiles(t.dataset.files, 'proyecto original');
+  if (t.dataset.chat) return openChat(t.dataset.chat);
+  if (t.dataset.run) return openRun(t.dataset.run);
+  if (t.dataset.toggle) {
+    const key = t.dataset.toggle;
+    collapsed.has(key) ? collapsed.delete(key) : collapsed.add(key);
+    localStorage.setItem('aiteam.collapsed', JSON.stringify([...collapsed]));
+    renderSidebar();
+  }
+});
+
+async function newChatFor(repoPath, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const chat = await api('POST', '/api/chats', { repoPath, agents: usableAgents() });
+    await loadChats();
+    openChat(chat.id);
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function showAddProject() {
+  state.view = 'addProject';
+  state.chat = null;
+  state.current = null;
+  renderSidebar();
+  const main = $('#main');
+  main.innerHTML = '';
+  main.append($('#addProjectTpl').content.cloneNode(true));
+  $('#addProjectForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const path = new FormData(e.target).get('path');
+    const errEl = $('[data-form-error]');
+    errEl.hidden = true;
+    try {
+      const p = await api('POST', '/api/projects', { path });
+      await loadProjects();
+      await newChatFor(p.path);
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.hidden = false;
+    }
+  });
+  $('[name=path]').focus();
+}
+$('#addProjectBtn').addEventListener('click', showAddProject);
+
+// ------------------------------------------------------------ equipo y uso
+
+async function loadUsage() {
+  state.usage = await api('GET', '/api/usage');
+  renderTeam();
+}
+
+function fmtReset(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  return sameDay ? d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' }) : d.toLocaleString('es', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+function meter(label, w) {
+  if (!w) return `<div class="meter"><span class="m-label">${label}</span><span class="muted">sin datos</span></div>`;
+  const left = Math.max(0, 100 - w.percent);
+  const cls = w.percent >= 90 ? 'err' : w.percent >= 70 ? 'warn' : 'ok';
+  return `<div class="meter" title="Usado ${w.percent}%${w.resetsAt ? ` · se reinicia ${fmtReset(w.resetsAt)}` : ''}">
+    <span class="m-label">${label}</span>
+    <span class="m-bar"><i class="${cls}" style="width:${w.percent}%"></i></span>
+    <span class="m-val">${left}% libre${w.resetsAt ? ` · ${fmtReset(w.resetsAt)}` : ''}</span>
+  </div>`;
+}
+
+function renderTeam() {
+  const panel = $('#teamPanel');
+  if (!panel) return;
+  panel.innerHTML = state.agents
+    .map((a) => {
+      const u = state.usage?.[a.id];
+      const cls = !a.installed ? 'err' : a.working === true ? 'ok' : a.working === false ? 'err' : 'unk';
+      const title = !a.installed
+        ? 'CLI no instalado'
+        : a.working === false
+          ? `No responde: ${a.error ?? ''}`
+          : a.working === true
+            ? `Funciona (${a.version})`
+            : `Instalado (${a.version}). Pulsa "Probar" para comprobar la sesión.`;
+      const meters =
+        u && (u.session || u.weekly)
+          ? meter('Sesión', u.session) + meter('Semana', u.weekly)
+          : `<div class="meter muted small-text">${u?.note ?? 'Sin datos de uso todavía.'}${u?.callsToday ? ` · ${u.callsToday} peticiones hoy` : ''}</div>`;
+      return `<div class="team-agent">
+        <div class="team-row" title="${esc(title)}">
+          <span class="dot ${cls}"></span><b style="color:${a.color}">${esc(a.name)}</b>
+          <button class="small ghost" data-test="${a.id}" ${a.installed ? '' : 'disabled'}>Probar</button>
+        </div>
+        ${meters}
+      </div>`;
+    })
+    .join('');
+}
+
+$('#teamPanel').addEventListener('click', async (e) => {
+  const id = e.target.dataset?.test;
+  if (!id) return;
+  e.target.disabled = true;
+  e.target.textContent = '…';
+  try {
+    Object.assign(agentInfo(id), await api('POST', `/api/agents/${id}/test`));
+  } catch (err) {
+    Object.assign(agentInfo(id), { working: false, error: err.message });
+  }
+  renderTeam();
+  loadUsage();
+});
+
+$('#refreshUsage').addEventListener('click', async (e) => {
+  e.target.disabled = true;
+  try {
+    state.usage = await api('POST', '/api/usage/refresh');
+    renderTeam();
+  } finally {
+    e.target.disabled = false;
+  }
+});
+
+events.addEventListener('usage', (e) => {
+  state.usage = JSON.parse(e.data);
+  renderTeam();
+});
+
+// ------------------------------------------------------------ explorador de archivos
+
+const files = { root: null, list: [], changed: {}, open: new Set() };
+
+async function openFiles(root, label) {
+  files.root = root;
+  $('#filesPanel').hidden = false;
+  $('#layout').classList.add('with-files');
+  $('#filesRootLabel').textContent = label ?? '';
+  $('#filesRootLabel').title = root;
+  $('#fileView').hidden = true;
+  $('#filesTree').innerHTML = '<p class="muted">Cargando…</p>';
+  try {
+    const t = await api('GET', `/api/fs/tree?root=${encodeURIComponent(root)}`);
+    files.list = t.files;
+    files.changed = t.changed;
+    renderFiles();
+  } catch (err) {
+    $('#filesTree').innerHTML = `<p class="error">${esc(err.message)}</p>`;
+  }
+}
+
+function renderFiles() {
+  const filter = $('#filesFilter').value.trim().toLowerCase();
+  const list = filter ? files.list.filter((f) => f.toLowerCase().includes(filter)) : files.list;
+  // Construye el árbol de carpetas.
+  const root = { dirs: new Map(), files: [] };
+  for (const f of list) {
+    const parts = f.split('/');
+    let node = root;
+    for (const dir of parts.slice(0, -1)) {
+      if (!node.dirs.has(dir)) node.dirs.set(dir, { dirs: new Map(), files: [] });
+      node = node.dirs.get(dir);
+    }
+    node.files.push(f);
+  }
+  const render = (node, prefix, depth) => {
+    let html = '';
+    for (const [name, child] of [...node.dirs.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const p = prefix + name;
+      const open = filter || files.open.has(p);
+      html += `<div class="ft-dir" data-dir="${esc(p)}" style="padding-left:${depth * 12}px">${open ? '▾' : '▸'} ${esc(name)}</div>`;
+      if (open) html += render(child, `${p}/`, depth + 1);
+    }
+    for (const f of node.files) {
+      const st = files.changed[f];
+      html += `<div class="ft-file ${st ? 'changed' : ''}" data-file="${esc(f)}" style="padding-left:${depth * 12 + 12}px">${esc(f.split('/').pop())}${st ? ` <span class="badge warn">${esc(st)}</span>` : ''}</div>`;
+    }
+    return html;
+  };
+  $('#filesTree').innerHTML = render(root, '', 0) || '<p class="muted">Sin archivos.</p>';
+}
+
+$('#filesFilter').addEventListener('input', renderFiles);
+$('#filesClose').addEventListener('click', () => {
+  $('#filesPanel').hidden = true;
+  $('#layout').classList.remove('with-files');
+});
+$('#filesTree').addEventListener('click', async (e) => {
+  const dir = e.target.closest('[data-dir]')?.dataset.dir;
+  if (dir) {
+    files.open.has(dir) ? files.open.delete(dir) : files.open.add(dir);
+    return renderFiles();
+  }
+  const file = e.target.closest('[data-file]')?.dataset.file;
+  if (!file) return;
+  const view = $('#fileView');
+  view.hidden = false;
+  view.innerHTML = '<p class="muted">Cargando…</p>';
+  try {
+    const f = await api('GET', `/api/fs/file?root=${encodeURIComponent(files.root)}&path=${encodeURIComponent(file)}`);
+    const body = f.binary
+      ? '<p class="muted">Archivo binario.</p>'
+      : `<pre class="code-view">${f.content
+          .split('\n')
+          .map((l, i) => `<span class="ln">${i + 1}</span>${esc(l)}`)
+          .join('\n')}</pre>${f.truncated ? '<p class="muted">(mostrando solo el principio)</p>' : ''}`;
+    view.innerHTML = `<div class="file-view-head"><code>${esc(f.path)}</code><button class="small ghost" id="fileViewClose">✕</button></div>${body}`;
+    $('#fileViewClose').addEventListener('click', () => (view.hidden = true));
+  } catch (err) {
+    view.innerHTML = `<p class="error">${esc(err.message)}</p>`;
+  }
+});
+
 // ------------------------------------------------------------ arranque
 
 await loadAgents();
-await Promise.all([loadRuns(), loadChats()]);
+state.defaultAutonomy = (await api('GET', '/api/config')).autonomy;
+await Promise.all([loadRuns(), loadChats(), loadProjects(), loadUsage()]);
 const lastChat = localStorage.getItem('aiteam.chat');
 if (lastChat && state.chats.some((c) => c.id === lastChat)) openChat(lastChat);
 else if (state.chats.length) openChat(state.chats[0].id);
-else showNewChat();
+else showAddProject();

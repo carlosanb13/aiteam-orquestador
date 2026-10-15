@@ -1,24 +1,54 @@
 # AITeam
 
-Un equipo de IAs en tu PC. AITeam usa tus suscripciones de **Claude Pro**, **ChatGPT Plus** y **Google AI Pro** a través de sus CLIs oficiales (Claude Code, Codex CLI y Gemini CLI) para que trabajen juntas en un mismo proyecto:
+**Tus IAs trabajando como un equipo.** AITeam junta en una sola app las suscripciones que ya pagas (**Claude Pro**, **ChatGPT Plus** y **Google AI Pro**) a través de sus CLIs oficiales (Claude Code, Codex CLI y Gemini CLI). Hablan entre ellas, se reparten el trabajo según en qué destaca cada una, se revisan y se pasan el relevo cuando a una se le acaba la cuota.
 
-1. **Planificar**: una IA coordinadora divide tu objetivo en subtareas, con sus dependencias.
-2. **Negociar**: cada IA se pone una nota del 0 al 10 para cada subtarea, comparándose con las demás según sus puntos fuertes. Gana la mejor nota, y se penaliza acumular carga para que trabajen en paralelo.
-3. **Aprobar**: ves el reparto con las notas y los motivos, y puedes cambiar responsables antes de empezar (o activar el inicio automático).
-4. **Trabajar**: cada IA trabaja en su propia copia aislada del repo (un *worktree* de git en su propia rama). Cuando una subtarea depende del trabajo de otra IA, ese trabajo se trae antes a su copia.
-5. **Comunicarse**: un tablero de mensajes compartido. Cada IA puede avisar a las demás (por ejemplo, "he cambiado la firma de esta función") y todas leen el tablero antes de cada subtarea.
-6. **Revisar**: revisión cruzada. La IA mejor valorada para revisar (que no sea la autora) revisa cada rama; si encuentra problemas, la autora los corrige.
-7. **Integrar y verificar**: se fusionan todas las ramas en `aiteam/<id>/integracion`, una IA resuelve los conflictos y, si das un comando de verificación (`npm test`, por ejemplo), se ejecuta y se intenta corregir si falla.
+AITeam es el **orquestador**: las capacidades (programar, ejecutar comandos, instalar dependencias, buscar en la web, usar sus servidores MCP…) las aporta cada IA con su propio CLI. AITeam las conecta, les da contexto compartido y coordina el trabajo.
 
-Tu rama principal nunca se toca: tú decides si fusionas el resultado.
+## Qué puedes hacer
+
+### 💬 Chat de equipo
+Un chat único donde hablas con todas a la vez:
+
+- Menciona a `@claude`, `@codex` (o `@chatgpt`), `@gemini` o `@equipo`. Sin mención responde la última IA que habló.
+- **Se llaman entre sí como compañeras**: si una IA escribe `@codex: revisa la función X`, Codex recibe la petición y contesta en el mismo chat. Tras 4 intercambios seguidos entre ellas, AITeam pausa para que decidas.
+- **Contexto compartido**: todas ven la conversación. Además, cada IA reanuda su propia sesión del CLI, así que recuerda lo que hizo en turnos anteriores.
+- **Relevo automático**: si una se queda sin cuota, otra atiende la misma petición.
+- Trabajan sobre una **copia aislada** del proyecto (una rama git propia de la conversación). Con **Ver cambios** revisas el diff y, si te convence, lo fusionas.
+- `/equipo <objetivo>` lanza una tarea de equipo completa a partir de lo hecho en la conversación.
+- **Modo seguro / Control total** por conversación: en modo seguro solo editan archivos; con control total pueden ejecutar comandos, instalar dependencias y usar todas sus herramientas sin pedir permiso.
+
+### ⚡ Tareas de equipo (en paralelo)
+1. **Planificar**: una IA coordinadora divide el objetivo en subtareas con dependencias.
+2. **Negociar**: cada IA se pone una nota del 0 al 10 para cada subtarea, comparándose con las demás. Gana la mejor nota, y se penaliza acumular carga para que trabajen en paralelo.
+3. **Aprobar**: ves notas y motivos, y puedes cambiar responsables (o empezar sin esperar).
+4. **Trabajar en paralelo**, cada una en su worktree de git. El trabajo del que depende una subtarea se trae antes a su copia.
+5. **Tablero de mensajes**: se avisan de cambios que afectan a otras.
+6. **Revisión cruzada** con ronda de corrección.
+7. **Integrar** todas las ramas; una IA resuelve conflictos.
+8. **Equipo rojo** (opcional): una IA intenta romper el resultado (vulnerabilidades, casos límite, incoherencias) y otra corrige lo que encuentre.
+9. **Verificar** con tu comando de tests e intentar arreglarlo si falla.
+
+Si una IA falla o se queda sin cuota, sus subtareas pasan a la siguiente mejor valorada.
+
+### 📊 Uso de tus suscripciones
+En la barra lateral ves cuánto te queda de cada una:
+
+- **Claude**: ventana de 5 h y semanal (de los eventos de límites que emite Claude Code).
+- **ChatGPT/Codex**: ventana de 5 h y semanal (de los registros locales de Codex).
+- **Gemini**: su CLI no expone la cuota; se muestran las peticiones de hoy.
+
+### 📁 Proyectos y archivos
+Barra lateral por proyectos con sus conversaciones y tareas, y un explorador de archivos con visor (del proyecto, de la copia de una conversación o del resultado integrado de una tarea).
+
+Tu rama principal nunca se toca: tú decides qué fusionas.
 
 ## Requisitos
 
 - Node.js 22 o superior y git.
 - Los CLIs que quieras usar, instalados y con la sesión iniciada con tu suscripción:
-  - `claude` (Claude Code): `npm i -g @anthropic-ai/claude-code`, y ejecutar `claude` una vez para iniciar sesión.
-  - `codex` (Codex CLI): `npm i -g @openai/codex`, y luego `codex login` con tu cuenta de ChatGPT.
-  - `gemini` (Gemini CLI): `npm i -g @google/gemini-cli`; ejecuta `gemini` e inicia sesión con la cuenta de Google que tiene AI Pro.
+  - **Claude Code**: `npm i -g @anthropic-ai/claude-code`, y ejecutar `claude` una vez para iniciar sesión.
+  - **Codex CLI**: `npm i -g @openai/codex`, y luego `codex login` con tu cuenta de ChatGPT.
+  - **Gemini CLI**: `npm i -g @google/gemini-cli`; ejecuta `gemini` e inicia sesión con la cuenta de Google que tiene AI Pro.
 
 ## Uso
 
@@ -27,28 +57,35 @@ npm start          # http://localhost:4317
 npm run mock       # modo simulación: no llama a ninguna IA, para probar la interfaz
 ```
 
-En la barra superior, **Probar** comprueba que cada IA responde con tu sesión (gasta muy poca cuota).
+1. **+ Añadir** un proyecto (carpeta de un repositorio git con al menos un commit).
+2. Abre una conversación (💬+) o una tarea de equipo (⚡+) desde el proyecto.
+3. **Probar** en el panel de equipo comprueba que cada IA responde con tu sesión.
 
-El proyecto sobre el que trabajen tiene que ser un repositorio git con al menos un commit. Las IAs parten del último commit; los cambios sin commit no los ven.
+> Puedes usar AITeam para mejorar AITeam: añade esta misma carpeta como proyecto. Las IAs trabajan en una copia aparte, así que la app sigue funcionando; cuando te guste el resultado, fusiona la rama y reinicia.
 
 ## Ajustes
 
-- **Autonomía**: por defecto las IAs solo pueden editar archivos en su copia. En modo *control total* también pueden ejecutar comandos sin pedir permiso (Claude con `bypassPermissions`, Codex sin sandbox, Gemini en `yolo`). Úsalo solo si confías en lo que les pides.
-- **Perfiles**: el texto de "en qué destaca" cada IA es lo que leen las demás al negociar. Ajústalo según tu experiencia.
-- **Modelo**: opcional, por IA (por ejemplo `opus`, `gpt-5-codex`, `gemini-2.5-pro`).
+- **Autonomía por defecto** (cada conversación puede cambiarla).
+- **Perfiles**: el texto de "en qué destaca" cada IA es lo que leen las demás al negociar y al decidir a quién pedir ayuda.
+- **Modelo** opcional por IA.
 
-## Dónde queda todo
+## Notas de plataforma
 
-- Las copias de trabajo se crean junto a tu proyecto, en `../.aiteam-<proyecto>/<id>/`. El botón **Limpiar copias** las borra (las ramas se conservan).
-- El historial de ejecuciones y los ajustes se guardan en `data/`.
+- En Windows, Codex se ejecuta con el sandbox no elevado (`windows.sandbox=unelevated`), porque el elevado no puede escribir en las copias de trabajo. No se cambia tu configuración global.
+- Las copias de trabajo se crean junto a tu proyecto, en `../.aiteam-<proyecto>/`.
+- Historial, ajustes y datos de uso se guardan en `data/` (no se versiona).
 
 ## Estructura
 
 ```
 server.js              servidor HTTP + eventos en tiempo real (SSE)
-src/agents.js          adaptadores de cada CLI (y modo simulación)
-src/orchestrator.js    fases: planificar, negociar, trabajar, revisar, integrar
+src/agents.js          adaptadores de cada CLI, sesiones y modo simulación
+src/chat.js            chat de equipo: menciones, delegación entre IAs, relevo
+src/orchestrator.js    tareas de equipo: planificar, negociar, paralelo, revisar, equipo rojo, integrar
 src/prompts.js         instrucciones que recibe cada IA en cada fase
+src/usage.js           uso de sesión y semanal de cada suscripción
+src/projects.js        proyectos y explorador de archivos
 src/git.js             worktrees, commits y fusiones
 public/                interfaz web
 ```
+

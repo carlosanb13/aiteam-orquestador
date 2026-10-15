@@ -8,32 +8,59 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <header class="topbar">
-      <div class="brand">
-        <svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true">
-          <path d="M9 16 23 10M9 16l14 6M23 10v12" stroke="currentColor" stroke-width="1.5" opacity=".35" />
-          <circle cx="9" cy="16" r="5" fill="#d97757" />
-          <circle cx="23" cy="10" r="5" fill="#10a37f" />
-          <circle cx="23" cy="22" r="5" fill="#4285f4" />
-        </svg>
-        <span>AITeam</span>
-        <span id="mockBadge" class="badge warn" hidden>simulación</span>
-      </div>
-      <div id="agentChips" class="chips"></div>
-      <button id="settingsBtn" class="ghost" title="Ajustes">Ajustes</button>
-    </header>
-
-    <div class="layout">
+    <div class="layout" id="layout">
       <aside class="sidebar">
-        <button id="newChatBtn" class="primary wide">+ Conversación</button>
-        <div class="sidebar-title">Conversaciones</div>
-        <ul id="chatList" class="run-list"></ul>
-        <div class="sidebar-title row-title">Tareas de equipo <button id="newRunBtn" class="small ghost" title="Nueva tarea de equipo">+</button></div>
-        <ul id="runList" class="run-list"></ul>
+        <div class="brand">
+          <svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true">
+            <path d="M9 16 23 10M9 16l14 6M23 10v12" stroke="currentColor" stroke-width="1.5" opacity=".35" />
+            <circle cx="9" cy="16" r="5" fill="#d97757" />
+            <circle cx="23" cy="10" r="5" fill="#10a37f" />
+            <circle cx="23" cy="22" r="5" fill="#4285f4" />
+          </svg>
+          <span>AITeam</span>
+          <span id="mockBadge" class="badge warn" hidden>simulación</span>
+          <button id="settingsBtn" class="ghost icon-btn" title="Ajustes" aria-label="Ajustes">⚙</button>
+        </div>
+
+        <div class="sidebar-scroll">
+          <div class="sidebar-title row-title">Proyectos <button id="addProjectBtn" class="small ghost" title="Añadir proyecto">+ Añadir</button></div>
+          <div id="projectTree" class="project-tree"></div>
+        </div>
+
+        <div class="team-panel">
+          <div class="sidebar-title row-title">Equipo y uso <button id="refreshUsage" class="small ghost" title="Actualizar el uso (consulta mínima a Claude)">↻</button></div>
+          <div id="teamPanel"></div>
+        </div>
       </aside>
 
       <main id="main"></main>
+
+      <aside class="files-panel" id="filesPanel" hidden>
+        <div class="files-head">
+          <b>Archivos</b>
+          <span class="muted small-text" id="filesRootLabel"></span>
+          <button class="small ghost" id="filesClose" title="Cerrar">✕</button>
+        </div>
+        <input id="filesFilter" placeholder="Filtrar archivos…" autocomplete="off" />
+        <div id="filesTree" class="files-tree"></div>
+        <div id="fileView" class="file-view" hidden></div>
+      </aside>
     </div>
+
+    <template id="addProjectTpl">
+      <section class="panel narrow">
+        <h1>Añadir un proyecto</h1>
+        <p class="muted">Indica la carpeta de un repositorio git (con al menos un commit). Después podrás abrir conversaciones y tareas de equipo sobre él.</p>
+        <form id="addProjectForm" class="form">
+          <label>
+            <span>Carpeta del proyecto</span>
+            <input name="path" required placeholder="C:\Users\tu-usuario\proyectos\mi-app" autocomplete="off" />
+          </label>
+          <p class="error" data-form-error hidden></p>
+          <button class="primary" type="submit">Añadir y abrir una conversación</button>
+        </form>
+      </section>
+    </template>
 
     <template id="newRunTpl">
       <section class="panel narrow">
