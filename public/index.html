@@ -56,7 +56,8 @@
     <template id="addProjectTpl">
       <section class="panel narrow">
         <h1>Añadir un proyecto</h1>
-        <p class="muted">Indica la carpeta de un repositorio git (con al menos un commit). Después podrás abrir conversaciones y tareas de equipo sobre él.</p>
+        <p class="muted">Añade la carpeta de un repositorio git con al menos un commit. Después podrás conversar con el equipo o encargarle una tarea.</p>
+        <p class="muted">Siguiente paso: pega la ruta de tu proyecto y abre la primera conversación.</p>
         <form id="addProjectForm" class="form">
           <label>
             <span>Carpeta del proyecto</span>
@@ -71,10 +72,8 @@
     <template id="newRunTpl">
       <section class="panel narrow">
         <h1>Nueva tarea para el equipo</h1>
-        <p class="muted">
-          Describe lo que quieres conseguir. Una IA lo dividirá en subtareas, el equipo negociará quién hace cada una según sus
-          puntos fuertes, trabajarán en paralelo en copias aisladas y se revisarán entre sí antes de integrar.
-        </p>
+        <p class="muted">Describe el resultado que buscas. El equipo preparará un plan, repartirá las subtareas, trabajará en copias aisladas y revisará los cambios antes de integrarlos.</p>
+        <p class="muted">Al terminar, podrás revisar el resultado antes de aplicarlo a tu proyecto.</p>
         <form id="newRunForm" class="form">
           <label>
             <span>Carpeta del proyecto (repositorio git)</span>
@@ -102,7 +101,7 @@
           <label class="check"><input type="checkbox" name="adversarial" /> Fase adversarial: una IA intenta romper el resultado (vulnerabilidades, casos límite) y otra lo corrige</label>
           <label class="check"><input type="checkbox" name="autoApprove" /> Empezar sin esperar a que apruebe el reparto</label>
           <p id="formError" class="error" hidden></p>
-          <button class="primary" type="submit">Empezar</button>
+          <button class="primary" type="submit">Crear tarea de equipo</button>
         </form>
       </section>
     </template>
@@ -110,10 +109,8 @@
     <template id="newChatTpl">
       <section class="panel narrow">
         <h1>Nueva conversación con el equipo</h1>
-        <p class="muted">
-          Un chat donde hablas con todas tus IAs a la vez. Menciona a cualquier integrante por su identificador o usa <b>@equipo</b>;
-          ellas también pueden pedirse cosas entre sí. Trabajan sobre una copia aislada de tu proyecto y tú decides cuándo aplicar los cambios.
-        </p>
+        <p class="muted">Conversa con una IA mediante su @nombre o pide respuestas de todas con <b>@equipo</b>. Usa <b>/equipo</b> para convertir un objetivo en una tarea paralela.</p>
+        <p class="muted">El trabajo ocurre en una copia aislada. Podrás revisar los cambios antes de aplicarlos a tu proyecto.</p>
         <form id="newChatForm" class="form">
           <label>
             <span>Carpeta del proyecto (repositorio git)</span>

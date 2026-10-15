@@ -220,7 +220,14 @@ function showNew(repo) {
 // ------------------------------------------------------------ vista de una tarea
 
 async function openRun(id) {
-  const run = await api('GET', `/api/runs/${id}`);
+  $('#main').innerHTML = '<section class="panel empty-state" role="status"><h2>Cargando tarea…</h2><p class="muted">Recuperando el plan y la actividad del equipo.</p></section>';
+  let run;
+  try { run = await api('GET', `/api/runs/${id}`); }
+  catch (err) {
+    $('#main').innerHTML = `<section class="panel empty-state" role="alert"><h2>No se pudo abrir la tarea</h2><p class="error">${esc(err.message)}</p><button class="primary" id="retryOpenRun">Reintentar</button></section>`;
+    $('#retryOpenRun').addEventListener('click', () => openRun(id));
+    return;
+  }
   state.logs = run.log ?? [];
   delete run.log;
   state.current = run;
@@ -266,6 +273,13 @@ function renderRun() {
   const awaiting = run.status === 'awaiting_approval';
   const active = ['planning', 'bidding', 'running', 'reviewing', 'integrating', 'attacking', 'testing', 'awaiting_approval'].includes(run.status);
   const team = run.activeAgents?.length ? run.activeAgents : run.agents;
+  const guidance = awaiting
+    ? 'Revisa el reparto, cambia responsables si hace falta y aprueba para que el equipo empiece.'
+    : run.status === 'done'
+      ? run.integration ? 'El trabajo terminó. Revisa los cambios integrados antes de aplicarlos a tu proyecto.' : 'El trabajo terminó. Revisa el plan y la actividad para conocer el resultado.'
+      : ['failed', 'cancelled', 'interrupted'].includes(run.status)
+        ? 'El trabajo se detuvo. Revisa el error y la actividad para decidir el siguiente paso.'
+        : 'El equipo está trabajando. Puedes seguir el plan y la actividad aquí; recibirás el resultado para revisarlo.';
 
   const tasksRows = run.tasks
     .map((t) => {
@@ -380,6 +394,7 @@ function renderRun() {
         </div>
       </div>
       <div class="pipeline">${STEPS.map(([k, label]) => `<div class="step ${stepClass(run, k)}">${label}</div>`).join('')}</div>
+      <p class="muted run-guidance" role="status">${guidance}</p>
       ${run.phase ? `<p class="phase">${esc(run.phase)}</p>` : ''}
       ${run.error ? `<p class="error">${esc(run.error)}</p>` : ''}
       ${run.dirty ? '<p class="muted">' + icon('alert', 13) + ' El repositorio tenía cambios sin commit; las IAs trabajan sobre el último commit.</p>' : ''}
@@ -391,14 +406,17 @@ function renderRun() {
           ${awaiting ? '<p class="muted">Cada barra es la nota que cada IA se puso para esa subtarea. Puedes cambiar el responsable antes de aprobar.</p>' : ''}
           <table><thead><tr><th>ID</th><th>Subtarea</th><th>Valoraciones</th><th>Responsable</th><th>Estado</th></tr></thead>
           <tbody>${tasksRows}</tbody></table></${awaiting ? 'section' : 'details'}>`
-        : ''
+        : '<section class="panel empty-state"><h3>Preparando el plan</h3><p class="muted">Las subtareas aparecerán aquí cuando la coordinadora termine de organizar el trabajo.</p></section>'
     }
     <details class="panel run-details" data-section="technical"><summary>Detalles técnicos del equipo</summary><h3>Actividad</h3><div class="lanes">${lanes}</div><h3>Mensajes entre IAs</h3><div class="board">${board}</div></details>
     ${reviews ? `<details class="panel run-details" data-section="reviews"><summary>Revisiones cruzadas</summary>${reviews}</details>` : ''}
     ${run.attack ? `<details class="panel run-details" data-section="attack"><summary>Pruebas adversariales</summary>${attackHtml(run.attack)}</details>` : ''}
   `;
 
-  for (const section of document.querySelectorAll('#main details.run-details')) section.open = openSections.has(section.dataset.section);
+  for (const section of document.querySelectorAll('#main details.run-details')) {
+    section.open = openSections.has(section.dataset.section) || (section.dataset.section === 'plan' && !state.runPlanSeen?.has(run.id));
+  }
+  (state.runPlanSeen ??= new Set()).add(run.id);
 
   for (const entry of state.logs) appendLog(entry, false);
   for (const el of document.querySelectorAll('.lane-log')) el.scrollTop = el.scrollHeight;
@@ -625,7 +643,14 @@ function md(text) {
 }
 
 async function openChat(id) {
-  const chat = await api('GET', `/api/chats/${id}`);
+  $('#main').innerHTML = '<section class="panel empty-state" role="status"><h2>Cargando conversación…</h2><p class="muted">Recuperando los mensajes y el estado del equipo.</p></section>';
+  let chat;
+  try { chat = await api('GET', `/api/chats/${id}`); }
+  catch (err) {
+    $('#main').innerHTML = `<section class="panel empty-state" role="alert"><h2>No se pudo abrir la conversación</h2><p class="error">${esc(err.message)}</p><button class="primary" id="retryOpenChat">Reintentar</button></section>`;
+    $('#retryOpenChat').addEventListener('click', () => openChat(id));
+    return;
+  }
   state.chat = chat;
   state.current = null;
   state.view = 'chat';
@@ -845,7 +870,9 @@ function renderChat(forceScroll = false) {
   renderChatHead();
   const box = $('#chatMsgs');
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
-  box.innerHTML = state.chat.messages.map(messageHtml).join('') + liveHtml();
+  box.innerHTML = (state.chat.messages.length
+    ? state.chat.messages.map(messageHtml).join('')
+    : '<section class="empty empty-state"><h2>La conversación está lista</h2><p>Escribe tu objetivo abajo. Menciona a una IA por su @nombre, usa @equipo para pedir varias respuestas o /equipo para iniciar una tarea.</p></section>') + liveHtml();
   hydrateRunCards();
   if (forceScroll || nearBottom) box.scrollTop = box.scrollHeight;
 }
@@ -949,7 +976,7 @@ function renderSidebar() {
     }
   }
   if (!paths.size) {
-    tree.innerHTML = '<p class="muted small-text" style="padding:0 6px">Añade la carpeta de un proyecto para empezar.</p>';
+    tree.innerHTML = '<p class="muted small-text" style="padding:0 6px">Aún no hay proyectos. Usa «+ Añadir» para elegir un repositorio y empezar.</p>';
     return;
   }
   tree.innerHTML = [...paths.values()]
@@ -981,7 +1008,7 @@ function renderSidebar() {
             <button class="small ghost" data-files="${esc(p.path)}" title="Ver archivos">${icon('folder', 15)}</button>
           </span>
         </div>
-        ${open ? `<ul class="run-list">${items || '<li class="muted small-text" style="cursor:default">Sin conversaciones todavía.</li>'}</ul>` : ''}
+        ${open ? `<ul class="run-list">${items || '<li class="muted small-text" style="cursor:default">Sin actividad. Abre una conversación o crea una tarea con los botones del proyecto.</li>'}</ul>` : ''}
       </div>`;
     })
     .join('');
