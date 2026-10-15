@@ -732,16 +732,15 @@ function renderChatHead() {
   const members = chat.agents
     .map((a) => {
       const st = chat.exhausted?.[a] ? badge([chat.exhausted[a].kind === 'auth' ? 'sin sesión' : 'sin cuota', 'err']) : chat.working?.agent === a ? badge(['trabajando', 'run']) : '';
-      return `<span class="member">${agentTag(a)} ${st}</span>`;
+      return `<span class="member" title="${esc(agentInfo(a).name)}">${emblem(a, 18)}<span class="member-name">${esc(agentInfo(a).name)}</span>${st}</span>`;
     })
     .join('');
   $('#chatHead').innerHTML = `
-    <div>
-      <div class="chat-title">${esc(chat.title)}</div>
-      <div class="muted mono small-text">${esc(chat.repoPath)} · copia en rama ${esc(chat.worktree.branch)}</div>
+    <div class="chat-identity">
+      <div class="chat-title" title="${esc(chat.title)}">${esc(chat.title)}</div>
       <div class="members">${members}</div>
     </div>
-    <div class="actions">
+    <div class="actions chat-actions">
       ${chat.working ? '<button class="danger" id="chatStop">Detener</button>' : ''}
       <div class="seg" id="chatAutonomy" title="Qué pueden hacer las IAs en esta conversación">
         <button type="button" data-mode="edits" class="${(chat.autonomy ?? state.defaultAutonomy) !== 'full' ? 'on' : ''}" title="Solo editan archivos en la copia">${icon('lock')} Seguro</button>
@@ -750,7 +749,14 @@ function renderChatHead() {
       <button id="chatFiles">${icon('folder')} Archivos</button>
       <button id="chatDiff" class="primary">${icon('fileDiff')} Revisar cambios</button>
       <button id="chatTools">Herramientas</button>
-      <button class="ghost" id="chatDelete" title="Borra la conversación y su copia de trabajo (la rama se conserva)">Eliminar</button>
+      <details class="chat-more">
+        <summary aria-label="Más opciones" title="Más opciones">⋯</summary>
+        <div class="chat-more-menu">
+          <div class="muted small-text">Proyecto y rama de trabajo</div>
+          <div class="mono small-text chat-path">${esc(chat.repoPath)}<br>${esc(chat.worktree.branch)}</div>
+          <button class="ghost" id="chatDelete" title="Borra la conversación y su copia de trabajo (la rama se conserva)">Eliminar conversación</button>
+        </div>
+      </details>
     </div>`;
   $('#chatStop')?.addEventListener('click', () => api('POST', `/api/chats/${chat.id}/stop`));
   $('#chatDiff').addEventListener('click', () => openReview('chats', chat.id));
