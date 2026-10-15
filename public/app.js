@@ -97,6 +97,33 @@ async function loadAgents(refresh = false) {
   renderChips();
 }
 
+$('#addAgentBtn').addEventListener('click', () => $('#addAgentDlg').showModal());
+$('#cancelAddAgent').addEventListener('click', () => $('#addAgentDlg').close());
+$('#addAgentForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = e.currentTarget;
+  const data = new FormData(form);
+  const error = $('[data-agent-error]', form);
+  error.hidden = true;
+  const submit = form.querySelector('[type=submit]');
+  submit.disabled = true;
+  try {
+    await api('POST', '/api/agents', {
+      id: data.get('id'), name: data.get('name'), command: data.get('command'),
+      args: String(data.get('args') ?? '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean),
+      profile: data.get('profile'),
+    });
+    await loadAgents(true);
+    $('#addAgentDlg').close();
+    form.reset();
+    if (state.view === 'new') showNew();
+    if (state.view === 'newChat') showNewChat();
+  } catch (err) {
+    error.textContent = err.message;
+    error.hidden = false;
+  } finally { submit.disabled = false; }
+});
+
 function renderChips() {
   renderTeam();
 }
@@ -471,7 +498,7 @@ $('#settingsBtn').addEventListener('click', async () => {
       const c = cfg.agents[a.id] ?? {};
       return `<div class="agent-setting" data-agent="${a.id}">
         <label class="check"><input type="checkbox" data-k="enabled" ${c.enabled !== false ? 'checked' : ''} /> <b style="color:${a.color}">${esc(a.name)}</b> <span class="muted">${esc(a.vendor)}</span></label>
-        <label><span>Modelo <em class="muted">(vacío = el predeterminado del CLI)</em></span><input data-k="model" value="${esc(c.model ?? '')}" /></label>
+        <label ${a.custom ? 'hidden' : ''}><span>Modelo <em class="muted">(vacío = el predeterminado del CLI)</em></span><input data-k="model" value="${esc(c.model ?? '')}" /></label>
         <label><span>En qué destaca (lo leen las demás IAs al negociar)</span><textarea data-k="profile" rows="2">${esc(c.profile ?? '')}</textarea></label>
         <div class="caps"><span class="muted small-text">Además de programar, puede:</span>${Object.entries(CAP_LABELS).map(([cap, label]) => `<label class="check"><input type="checkbox" data-cap="${cap}" ${(c.capabilities ?? []).includes(cap) ? 'checked' : ''} /> ${esc(CAP_TITLES[cap])}</label>`).join('')}</div>
       </div>`;
@@ -561,8 +588,9 @@ function md(text) {
       html += esc(parts[i])
         .replace(/`([^`\n]+)`/g, '<code>$1</code>')
         .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
-        .replace(/(^|\s)@(claude|codex|chatgpt|gemini|antigravity|agy|equipo|todos)\b/gi, (m, pre, name) => {
+        .replace(/(^|\s)@([a-z][a-z0-9_]*)\b/gi, (m, pre, name) => {
           const id = { chatgpt: 'codex', antigravity: 'gemini', agy: 'gemini' }[name.toLowerCase()] ?? name.toLowerCase();
+          if (!['equipo', 'todos'].includes(id) && !state.agents.some((a) => a.id === id)) return m;
           const color = state.agents.find((a) => a.id === id)?.color ?? 'var(--accent)';
           return `${pre}<span class="mention" style="color:${color}">@${name}</span>`;
         })
@@ -591,7 +619,7 @@ async function openChat(id) {
       <form class="composer" id="composer">
         <div class="mention-bar" id="mentionBar"></div>
         <div class="composer-row">
-          <textarea id="chatInput" rows="2" placeholder="Escribe a tu equipo… (@claude, @codex, @antigravity, @equipo · /equipo objetivo lanza una tarea de equipo en paralelo)"></textarea>
+          <textarea id="chatInput" rows="2" placeholder="Escribe a tu equipo… usa @nombre, @equipo o /equipo objetivo"></textarea>
           <button type="button" class="mic-btn" id="chatMic" title="Dictar por voz (Ctrl+M)" aria-label="Dictar por voz">${icon('mic', 18)}</button>
           <button class="primary" type="submit">Enviar</button>
         </div>
@@ -940,6 +968,20 @@ function showAddProject() {
   $('[name=path]').focus();
 }
 $('#addProjectBtn').addEventListener('click', showAddProject);
+$('#selfDevBtn').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  try {
+    const { root } = await api('GET', '/api/app');
+    const existing = state.chats.find((c) => normPath(c.repoPath) === normPath(root));
+    if (existing) return openChat(existing.id);
+    if (!usableAgents().length) throw new Error('Ninguna IA está disponible. Revisa el equipo y prueba su conexión.');
+    await api('POST', '/api/projects', { path: root });
+    await loadProjects();
+    await newChatFor(root);
+  } catch (err) { alert(err.message); }
+  finally { btn.disabled = false; }
+});
 
 // ------------------------------------------------------------ equipo y uso
 

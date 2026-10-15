@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { runProcess } from './runner.js';
-import { loadConfig } from './config.js';
+import { loadConfig, saveConfig } from './config.js';
 import { recordClaudeRateLimit, recordCall, touchUsage } from './usage.js';
 
 export const AGENTS = {
@@ -36,6 +36,38 @@ export const AGENTS = {
     color: '#4285f4',
   },
 };
+
+const BUILTIN_IDS = new Set(Object.keys(AGENTS));
+const SAFE_ID = /^[a-z][a-z0-9_]{1,23}$/;
+const SAFE_COMMAND = /^[a-zA-Z0-9_.-]+$/;
+const SAFE_ARG = /^[a-zA-Z0-9_./:=+-]+$/;
+
+function validateCustom(input) {
+  const id = String(input.id ?? '').trim().toLowerCase();
+  const name = String(input.name ?? '').trim();
+  const command = String(input.command ?? '').trim();
+  const args = input.args ?? [];
+  if (!SAFE_ID.test(id) || BUILTIN_IDS.has(id) || id === 'equipo' || id === 'todos' || id === 'team') throw new Error('Identificador inválido o reservado (2–24 letras, números o guion bajo).');
+  if (!name || name.length > 48) throw new Error('El nombre debe tener entre 1 y 48 caracteres.');
+  if (!SAFE_COMMAND.test(command)) throw new Error('Indica el nombre del ejecutable disponible en PATH, sin rutas ni espacios.');
+  if (!Array.isArray(args) || args.length > 20 || args.some((a) => typeof a !== 'string' || !SAFE_ARG.test(a))) throw new Error('Los argumentos deben ser una lista de opciones simples, sin espacios ni caracteres de shell.');
+  return { id, name, handle: id, vendor: 'CLI personalizado', tagline: String(input.tagline ?? '').trim().slice(0, 120), cli: command, args, color: '#8b6fd6', custom: true };
+}
+
+for (const item of Object.values(loadConfig().customAgents ?? {})) {
+  try { const agent = validateCustom(item); AGENTS[agent.id] = agent; } catch { /* configuración antigua o dañada */ }
+}
+
+export function addCustomAgent(input) {
+  const agent = validateCustom(input);
+  if (AGENTS[agent.id]) throw new Error('Ya existe una IA con ese identificador.');
+  saveConfig({
+    customAgents: { [agent.id]: agent },
+    agents: { [agent.id]: { enabled: true, model: '', profile: String(input.profile ?? '').trim().slice(0, 1000), capabilities: [] } },
+  });
+  AGENTS[agent.id] = agent;
+  return agent;
+}
 
 export const MOCK = process.argv.includes('--mock') || process.env.AITEAM_MOCK === '1';
 
@@ -307,42 +339,45 @@ async function invokeOnce(agentId, { prompt, cwd, mode = 'read', onEvent, onSpaw
   const state = {};
   const emit = (msg) => onEvent?.(msg);
 
-  let args;
-  let onLine;
-  if (agentId === 'claude') {
-    args = claudeArgs(mode, autonomy, model, session);
-    onLine = (l) => claudeLine(l, state, emit);
-  } else if (agentId === 'codex') {
-    args = codexArgs(mode, autonomy, model, session);
-    onLine = (l) => codexLine(l, state, emit);
-  } else if (agentId === 'gemini') {
-    args = agyArgs(mode, autonomy, model, session);
-    onLine = (l) => agyLine(l, state, emit);
-  } else {
-    throw new Error(`IA desconocida: ${agentId}`);
-  }
+  const adapter = ADAPTERS[agentId] ?? (AGENTS[agentId]?.custom ? customAdapter : null);
+  if (!adapter) throw new Error(`IA desconocida: ${agentId}`);
+  const args = adapter.args({ mode, autonomy, model, session, agent: AGENTS[agentId] });
+  const onLine = (line) => adapter.line?.(line, state, emit);
 
   recordCall(agentId);
-  const input = agentId === 'gemini' ? `${JSON.stringify({ event: 'user', message: { content: prompt } })}\n` : prompt;
+  const input = adapter.input?.(prompt) ?? prompt;
   const res = await runProcess(AGENTS[agentId].cli, args, { cwd, input, timeoutMs: timeout, onLine, onSpawn });
   if (agentId === 'codex') touchUsage(); // Codex acaba de escribir su estado de límites en sus registros
   const durationMs = Date.now() - started;
   if (res.cancelled) return { ok: false, cancelled: true, error: 'Cancelado.', durationMs };
   if (res.timedOut) return { ok: false, error: `Tiempo agotado (${Math.round(timeout / 60_000)} min).`, durationMs };
 
-  let out;
-  if (agentId === 'claude') out = claudeResult(res, state);
-  else if (agentId === 'codex') out = codexResult(res, state);
-  else out = agyResult(res, state);
+  const out = adapter.result(res, state);
   return { ...out, durationMs };
 }
 
+const ADAPTERS = {
+  claude: { args: ({ mode, autonomy, model, session }) => claudeArgs(mode, autonomy, model, session), line: claudeLine, result: claudeResult },
+  codex: { args: ({ mode, autonomy, model, session }) => codexArgs(mode, autonomy, model, session), line: codexLine, result: codexResult },
+  gemini: { args: ({ mode, autonomy, model, session }) => agyArgs(mode, autonomy, model, session), line: agyLine, result: agyResult,
+    input: (prompt) => `${JSON.stringify({ event: 'user', message: { content: prompt } })}\n` },
+};
+// Contrato sencillo: el CLI recibe el prompt completo por stdin y devuelve texto por stdout.
+// Se ejecuta por turno sin sesión propia; cada prompt contiene el contexto del chat.
+const customAdapter = {
+  args: ({ agent }) => agent.args,
+  result: (res) => res.code === 0 && res.stdout.trim()
+    ? { ok: true, text: res.stdout.trim() }
+    : { ok: false, error: tail(res.stderr || res.stdout) || `El CLI terminó con código ${res.code}.` },
+};
+
 /** Comprueba si el CLI está instalado y, opcionalmente, si responde (consume un poco de cuota). */
 export async function checkAgent(agentId, { live = false } = {}) {
+  if (!AGENTS[agentId]) throw new Error(`IA desconocida: ${agentId}`);
   if (MOCK) return { installed: true, version: 'simulación', working: live ? true : null };
   const res = await runProcess(AGENTS[agentId].cli, ['--version'], { timeoutMs: 20_000 });
-  const installed = res.code === 0;
-  const version = installed ? res.stdout.trim().split('\n')[0] : null;
+  const installed = res.code === 0 || (AGENTS[agentId].custom && !/not recognized|not found|ENOENT/i.test(res.stderr) && res.code != null);
+  const version = installed ? (res.stdout.trim().split('\n')[0] || 'instalado') : null;
   if (!installed || !live) return { installed, version, working: null };
   const probe = await invokeAgent(agentId, {
     prompt: 'Responde únicamente con la palabra OK.',

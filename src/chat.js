@@ -37,10 +37,13 @@ const short = (s, n = 160) => {
 /** Menciones del usuario: "@claude haz X" o "@equipo ...". */
 export function parseMentions(text, members) {
   const found = new Set();
-  for (const m of String(text).matchAll(/@([a-záéíóú]+)/gi)) {
+  for (const m of String(text).matchAll(/@([a-záéíóú][a-z0-9_]*)/gi)) {
     const word = m[1].toLowerCase();
     if (TEAM_ALIASES.has(word)) members.forEach((a) => found.add(a));
-    else if (ALIASES[word] && members.includes(ALIASES[word])) found.add(ALIASES[word]);
+    else {
+      const id = ALIASES[word] ?? members.find((a) => AGENTS[a]?.handle === word);
+      if (id && members.includes(id)) found.add(id);
+    }
   }
   return [...found];
 }
@@ -54,8 +57,8 @@ export function parseDelegations(text, members, self) {
   const out = [];
   let current = null;
   for (const line of lines) {
-    const m = line.match(/^\s*(?:[-*>]\s*)?\**@([a-zA-Z]+)\**\s*[:,—–-]\s*(.*)$/);
-    const target = m && (TEAM_ALIASES.has(m[1].toLowerCase()) ? 'team' : ALIASES[m[1].toLowerCase()]);
+    const m = line.match(/^\s*(?:[-*>]\s*)?\**@([a-zA-Z][a-zA-Z0-9_]*)\**\s*[:,—–-]\s*(.*)$/);
+    const target = m && (TEAM_ALIASES.has(m[1].toLowerCase()) ? 'team' : (ALIASES[m[1].toLowerCase()] ?? members.find((a) => AGENTS[a]?.handle === m[1].toLowerCase())));
     if (target) {
       current = { target, text: m[2] };
       out.push(current);
@@ -333,7 +336,7 @@ export class ChatManager extends EventEmitter {
     this.save(chat);
 
     const session = chat.sessions[agent] ?? { id: agent === 'claude' ? crypto.randomUUID() : null, resume: false, seen: 0 };
-    const isNew = !session.resume;
+    const isNew = !session.resume || AGENTS[agent]?.custom;
     const msgs = chat.messages.filter((m) => m.id !== request.id);
     const full = transcript(msgs.slice(-40));
     const delta = transcript(msgs.slice(session.seen).filter((m) => m.from !== agent));

@@ -6,7 +6,7 @@ import { ChatManager } from './src/chat.js';
 import * as G from './src/git.js';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
-import { AGENTS, MOCK, checkAgent, invokeAgent } from './src/agents.js';
+import { AGENTS, MOCK, addCustomAgent, checkAgent, invokeAgent } from './src/agents.js';
 import { getUsage, onUsageChange } from './src/usage.js';
 import * as Projects from './src/projects.js';
 import * as Review from './src/review.js';
@@ -153,6 +153,11 @@ async function agentStatus(refresh = false) {
 
 const routes = [
   ['GET', /^\/api\/agents$/, async (req, res, _m, url) => send(res, 200, { mock: MOCK, agents: await agentStatus(url.searchParams.has('refresh')) })],
+  ['POST', /^\/api\/agents$/, async (req, res) => {
+    const agent = addCustomAgent(await readBody(req));
+    agentCache = null;
+    send(res, 201, { agent });
+  }],
   [
     'POST',
     /^\/api\/agents\/(\w+)\/test$/,

@@ -21,13 +21,8 @@
     <div class="layout" id="layout">
       <aside class="sidebar">
         <div class="brand">
-          <svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true">
-            <path d="M9 16 23 10M9 16l14 6M23 10v12" stroke="currentColor" stroke-width="1.5" opacity=".35" />
-            <circle cx="9" cy="16" r="5" fill="#d97757" />
-            <circle cx="23" cy="10" r="5" fill="#10a37f" />
-            <circle cx="23" cy="22" r="5" fill="#4285f4" />
-          </svg>
-          <span>AITeam</span>
+          <img class="brand-mark" src="logo-ai-icon-transparent.png" width="32" height="32" alt="" />
+          <span class="brand-name">team</span>
           <span id="mockBadge" class="badge warn" hidden>simulación</span>
           <button id="settingsBtn" class="ghost icon-btn" title="Ajustes" aria-label="Ajustes"><svg class="i" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
         </div>
@@ -35,10 +30,11 @@
         <div class="sidebar-scroll">
           <div class="sidebar-title row-title">Proyectos <button id="addProjectBtn" class="small ghost" title="Añadir proyecto">+ Añadir</button></div>
           <div id="projectTree" class="project-tree"></div>
+          <button id="selfDevBtn" class="small ghost self-dev-btn" title="Abrir un chat para mejorar AITeam con tu equipo de IAs">Mejorar AITeam</button>
         </div>
 
         <div class="team-panel">
-          <div class="sidebar-title row-title">Equipo y uso <button id="refreshUsage" class="small ghost" title="Actualizar el uso (consulta mínima a Claude)"><svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></svg></button></div>
+          <div class="sidebar-title row-title">Equipo y uso <span><button id="addAgentBtn" class="small ghost" title="Añadir IA">+ IA</button><button id="refreshUsage" class="small ghost" title="Actualizar el uso (consulta mínima a Claude)"><svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></svg></button></span></div>
           <div id="teamPanel"></div>
         </div>
       </aside>
@@ -115,7 +111,7 @@
       <section class="panel narrow">
         <h1>Nueva conversación con el equipo</h1>
         <p class="muted">
-          Un chat donde hablas con todas tus IAs a la vez. Menciona a <b>@claude</b>, <b>@codex</b>, <b>@antigravity</b> o <b>@equipo</b>;
+          Un chat donde hablas con todas tus IAs a la vez. Menciona a cualquier integrante por su identificador o usa <b>@equipo</b>;
           ellas también pueden pedirse cosas entre sí. Trabajan sobre una copia aislada de tu proyecto y tú decides cuándo aplicar los cambios.
         </p>
         <form id="newChatForm" class="form">
@@ -189,6 +185,21 @@
           <button value="cancel" class="ghost">Cancelar</button>
           <button id="saveSettings" value="default" class="primary">Guardar</button>
         </div>
+      </form>
+    </dialog>
+
+    <dialog id="addAgentDlg">
+      <form id="addAgentForm" class="form">
+        <h2>Añadir IA por CLI</h2>
+        <p class="muted">Conecta una herramienta instalada en este ordenador que lea el mensaje por entrada estándar y escriba su respuesta en texto por salida estándar. Inicia sesión en su CLI antes de probarla aquí.</p>
+        <label><span>Nombre visible</span><input name="name" required maxlength="48" placeholder="Mi asistente" /></label>
+        <label><span>Identificador para menciones</span><input name="id" required pattern="[a-z][a-z0-9_]{1,23}" placeholder="asistente" /></label>
+        <label><span>Comando instalado en PATH</span><input name="command" required placeholder="mi-cli" /></label>
+        <label><span>Argumentos fijos, uno por línea (opcional)</span><textarea name="args" rows="2" placeholder="run"></textarea></label>
+        <label><span>En qué destaca (opcional)</span><textarea name="profile" rows="2"></textarea></label>
+        <p class="muted small-text">El identificador queda fijo y se usa para @menciones. El CLI se ejecutará en la copia de trabajo del proyecto; su acceso a archivos depende de la propia herramienta.</p>
+        <p class="error" data-agent-error hidden></p>
+        <div class="dialog-actions"><button type="button" class="ghost" id="cancelAddAgent">Cancelar</button><button class="primary" type="submit">Añadir IA</button></div>
       </form>
     </dialog>
 

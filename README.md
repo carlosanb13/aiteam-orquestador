@@ -4,6 +4,16 @@
 
 AITeam es el **orquestador**: las capacidades (programar, ejecutar comandos, instalar dependencias, buscar en la web, usar sus servidores MCP…) las aporta cada IA con su propio CLI. AITeam las conecta, les da contexto compartido y coordina el trabajo.
 
+### Añadir otra IA
+
+Pulsa **+ IA** en la sección «Equipo y uso». Puedes registrar un CLI instalado en `PATH` que reciba el mensaje completo por `stdin` y escriba su respuesta en texto por `stdout`. Indica un identificador estable para mencionarlo con `@identificador`; aparecerá en chats, reparto de tareas y revisión cruzada. Inicia sesión con el propio CLI antes de pulsar **Probar**. Esta primera integración admite argumentos fijos sencillos, sin espacios ni caracteres de shell; no requiere claves API en AITeam.
+
+Los conectores personalizados reciben el contexto completo en cada turno y no reanudan sesiones internas. Sus permisos para leer, editar y ejecutar comandos los determina el propio CLI. Las integraciones de Claude, Codex y Antigravity conservan sus sesiones y formatos originales.
+
+### Mejorar AITeam desde AITeam
+
+El botón **Mejorar AITeam** abre o retoma un chat del equipo sobre el repositorio de la propia aplicación. Puedes pedir cambios, dejar que las IAs se revisen y usar **Ver cambios** antes de **Aplicar al proyecto**. El chat se crea desde el último commit, así que guarda en git los cambios locales que quieras incluir antes de abrir uno nuevo. Tras aplicar cambios del servidor, reinicia AITeam desde Ajustes.
+
 ## Qué puedes hacer
 
 ### 💬 Chat de equipo

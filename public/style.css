@@ -89,6 +89,8 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
   z-index: 5;
 }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 16px; }
+.brand-mark { display: block; flex: none; width: 32px; height: 32px; padding: 2px; box-sizing: border-box; border-radius: 8px; background: #f8f7f3; object-fit: contain; }
+.brand-name { font-size: 18px; font-weight: 750; letter-spacing: -.035em; }
 .chips { display: flex; gap: 8px; flex: 1; flex-wrap: wrap; }
 .chip {
   display: flex;
@@ -331,6 +333,7 @@ main { overflow-y: auto; height: 100vh; }
 .dot.pulse { animation: blink 1.2s infinite; }
 
 .team-panel { border-top: 1px solid var(--border); padding: 4px 12px 12px; max-height: 45vh; overflow-y: auto; }
+.self-dev-btn { width: 100%; margin-top: 10px; text-align: left; }
 .team-agent { padding: 6px 0; border-bottom: 1px dashed var(--border); }
 .team-agent:last-child { border-bottom: 0; }
 .team-row { display: flex; align-items: center; gap: 7px; font-size: 13px; }

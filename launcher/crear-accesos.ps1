@@ -1,7 +1,7 @@
 # Crea los accesos directos de AITeam en el escritorio y en el menú Inicio, y corrige el anclado en la barra de tareas.
 # Uso: powershell -ExecutionPolicy Bypass -File launcher\crear-accesos.ps1
 $launcher = Join-Path $PSScriptRoot 'AITeam.vbs'
-$icon = Join-Path $PSScriptRoot 'aiteam.ico'
+$icon = Join-Path $PSScriptRoot 'aiteam-ai.ico'
 if (-not (Test-Path $icon)) { & (Join-Path $PSScriptRoot 'crear-icono.ps1') }
 
 # Windows agrupa en la barra de tareas las ventanas y los accesos que comparten AppUserModelID.
@@ -34,6 +34,9 @@ foreach ($lnkPath in $targets) {
 # Si ya estaba anclado a la barra de tareas, se corrige también ese acceso.
 $pinned = Join-Path $env:APPDATA 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\AITeam.lnk'
 if (Test-Path $pinned) {
+    $lnk = $shell.CreateShortcut($pinned)
+    $lnk.IconLocation = "$icon,0"
+    $lnk.Save()
     [AITeamAppId]::SetOnShortcut($pinned, $appId)
     Write-Host "Acceso anclado actualizado: $pinned"
 }

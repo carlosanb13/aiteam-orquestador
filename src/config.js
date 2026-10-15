@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const DATA_DIR = path.resolve(import.meta.dirname, '..', 'data');
+export const DATA_DIR = process.env.AITEAM_DATA_DIR ? path.resolve(process.env.AITEAM_DATA_DIR) : path.resolve(import.meta.dirname, '..', 'data');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 
 export const DEFAULT_CONFIG = {
@@ -13,6 +13,7 @@ export const DEFAULT_CONFIG = {
   // Dictado: "browser" usa el reconocimiento del navegador; "local" usa Whisper en este PC, sin internet.
   speech: { engine: 'browser', model: 'base', language: 'es' },
   notifications: { enabled: true, sound: true },
+  customAgents: {},
   agents: {
     claude: {
       enabled: true,

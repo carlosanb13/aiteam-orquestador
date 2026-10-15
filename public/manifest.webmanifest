@@ -1,7 +1,7 @@
 {
   "name": "AITeam",
   "short_name": "AITeam",
-  "description": "Tus IAs (Claude, ChatGPT y Gemini) trabajando como un equipo.",
+  "description": "Tus inteligencias artificiales trabajando como un equipo.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#141413",
