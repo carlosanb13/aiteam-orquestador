@@ -13,6 +13,9 @@ async function capture(chat, turn, phase) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiteam-snapshot-'));
   try {
     const env = { GIT_INDEX_FILE: path.join(dir, 'index') };
+    const indexPath = (await G.git(cwd, ['rev-parse', '--git-path', 'index'])).stdout.trim();
+    const sourceIndex = path.isAbsolute(indexPath) ? indexPath : path.resolve(cwd, indexPath);
+    if (fs.existsSync(sourceIndex)) fs.copyFileSync(sourceIndex, env.GIT_INDEX_FILE);
     await G.gitWithEnv(cwd, ['read-tree', 'HEAD'], env);
     await G.gitWithEnv(cwd, ['add', '-A'], env);
     const tree = (await G.gitWithEnv(cwd, ['write-tree'], env)).stdout.trim();
@@ -26,6 +29,7 @@ async function capture(chat, turn, phase) {
 }
 
 export async function list(chat) {
+  if (Array.isArray(chat.snapshotTurns)) return { turns: chat.snapshotTurns, cursor: Math.min(chat.snapshotCursor ?? chat.snapshotTurns.length, chat.snapshotTurns.length) };
   const out = await G.git(chat.worktree.path, ['for-each-ref', '--format=%(refname) %(objectname)', `${prefix(chat)}/`]);
   const entries = new Map();
   for (const line of out.stdout.trim().split('\n').filter(Boolean)) {
@@ -41,6 +45,7 @@ export async function list(chat) {
     const diff = await G.git(chat.worktree.path, ['diff', '--name-only', item.before, item.after]);
     item.files = diff.stdout.split('\n').filter(Boolean);
   }
+  chat.snapshotTurns = turns;
   return { turns, cursor: Math.min(chat.snapshotCursor ?? turns.length, turns.length) };
 }
 
@@ -50,14 +55,25 @@ export async function beforeTurn(chat) {
     await G.git(chat.worktree.path, ['update-ref', '-d', `${prefix(chat)}/${item.id}/before`]);
     await G.git(chat.worktree.path, ['update-ref', '-d', `${prefix(chat)}/${item.id}/after`]);
   }
+  chat.snapshotTurns = turns.slice(0, cursor);
   const id = `${Date.now().toString().padStart(13, '0')}-${crypto.randomBytes(4).toString('hex')}`;
   await capture(chat, id, 'before');
   return id;
 }
 
 export async function afterTurn(chat, id) {
-  await capture(chat, id, 'after');
-  chat.snapshotCursor = (await list(chat)).turns.length;
+  const after = await capture(chat, id, 'after');
+  const before = (await G.git(chat.worktree.path, ['rev-parse', `${prefix(chat)}/${id}/before`])).stdout.trim();
+  const diff = await G.git(chat.worktree.path, ['diff', '--name-only', before, after]);
+  chat.snapshotTurns ??= [];
+  chat.snapshotTurns.push({ id, before, after, files: diff.stdout.split('\n').filter(Boolean) });
+  chat.snapshotCursor = chat.snapshotTurns.length;
+}
+
+export async function remove(chat) {
+  if (!valid(chat.id)) return;
+  const refs = await G.git(chat.worktree.path, ['for-each-ref', '--format=%(refname)', `${prefix(chat)}/`]);
+  for (const ref of refs.stdout.split('\n').filter(Boolean)) await G.git(chat.worktree.path, ['update-ref', '-d', ref]);
 }
 
 async function restoreOid(chat, oid) {

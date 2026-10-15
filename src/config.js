@@ -9,6 +9,7 @@ export const DEFAULT_CONFIG = {
   // "full": además pueden ejecutar cualquier comando (tests, instalaciones...) sin pedir permiso.
   autonomy: 'edits',
   taskTimeoutMinutes: 30,
+  bus: { askTimeoutMs: 300_000, gateTimeoutMs: 300_000 },
   maxFixRounds: 1,
   // Dictado: "browser" usa el reconocimiento del navegador; "local" usa Whisper en este PC, sin internet.
   speech: { engine: 'browser', model: 'base', language: 'es' },

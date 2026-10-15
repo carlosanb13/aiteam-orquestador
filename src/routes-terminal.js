@@ -13,6 +13,7 @@ export function terminalRoutes(chats, orchestrator, send, readBody, broadcast) {
     ['POST', root, async (req, res, m) => {
       const body = await readBody(req);
       const { cwd, autonomy } = Terminal.worktreeFor(chats, orchestrator, m[1], m[2], body.agent);
+      if (m[1] === 'chats') chats.assertIdle(chats.get(m[2]));
       // HTTP requests represent the human user; agents must call execute with actor set explicitly.
       send(res, 202, Terminal.execute({ kind: m[1], ownerId: m[2], cwd, autonomy, command: body.command, emit: broadcast }));
     }],

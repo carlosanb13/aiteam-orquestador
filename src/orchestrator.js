@@ -15,6 +15,7 @@ const ACTIVE = new Set(['planning', 'bidding', 'running', 'reviewing', 'integrat
 const LOAD_PENALTY = 1.5;
 const CAPABLE_RETRY_DELAY_MS = 45_000; // espera antes de reintentar con la única IA capaz tras un error de red
 const MAX_ATTEMPTS_PER_TASK = 3;
+const MAX_SIGNAL_ROUNDS = 4;
 const QUOTA_ERROR = /usage limit|rate.?limit|quota|limit reached|resource.?exhausted|too many requests|\b429\b|credits/i;
 
 const short = (s, n = 400) => {
@@ -91,7 +92,7 @@ export class Orchestrator extends EventEmitter {
         if (ACTIVE.has(run.status)) {
           run.status = 'interrupted';
           run.error = 'El servidor se detuvo mientras esta tarea estaba en curso.';
-          for (const t of run.tasks) if (t.status === 'running') t.status = 'failed';
+          for (const t of run.tasks) if (['running', 'waiting_reply', 'escalated'].includes(t.status)) t.status = 'failed';
         }
         this.runs.set(run.id, run);
       } catch {
@@ -161,13 +162,15 @@ export class Orchestrator extends EventEmitter {
     child.on('close', () => set.delete(child));
   }
 
-  async call(run, agentId, prompt, { cwd, mode = 'read', label }) {
+  async call(run, agentId, prompt, { cwd, mode = 'read', label, session, fallbackPrompt }) {
     this.checkCancelled(run);
     this.log(run, agentId, `▶ ${label}`);
     const res = await invokeAgent(agentId, {
       prompt,
       cwd,
       mode,
+      session,
+      fallbackPrompt,
       onEvent: (msg) => this.log(run, agentId, msg),
       onSpawn: (child) => this.track(run, child),
     });
@@ -212,45 +215,62 @@ export class Orchestrator extends EventEmitter {
 
   /** Las marcas del agente se procesan tras su turno; la respuesta reanuda esa subtarea. */
   async handleSignals(run, task, agent, response) {
-    const signals = [];
-    for (const m of response.json?.messages ?? []) {
-      if (m?.text && !m.kind) this.post(run, agent, String(m.to ?? 'all'), m.text);
-      else if (m?.kind) signals.push(m);
-    }
-    for (const line of String(response.text ?? '').split(/\r?\n/)) {
-      const match = line.match(/^\[\[(ASK|ESCALATE):([^:\]]+):([^\]]+)\]\]\s*(.+)$/);
-      if (match) signals.push({ kind: match[1].toLowerCase(), to: match[2], text: match[4], threadId: match[3] });
-    }
-    for (const signal of signals) {
-      const to = String(signal.to ?? 'user');
-      const text = String(signal.text ?? '').trim();
-      if (!text) continue;
-      if (signal.kind === 'escalate' || signal.kind === 'escalation') {
-        this.bus.post(run, { from: agent, to: 'user', text, kind: 'escalation', taskId: task.id });
-        const gate = this.bus.gate(run, { kind: 'escalation', question: text, options: ['continue', 'cancel'] });
-        task.status = 'escalated';
-        this.touch(run);
-        const choice = await this.bus.waitForGate(gate);
-        if (choice !== 'continue') throw new Error(`Escalación de ${task.id} cancelada.`);
-        task.status = 'running';
-      } else if (signal.kind === 'ask') {
-        if (to !== 'user' && !run.agents.includes(to)) throw new Error('Destinatario de pregunta desconocido.');
-        const { message, promise } = this.bus.ask(run, { from: agent, to, text, taskId: task.id });
-        task.status = 'waiting_reply';
-        this.touch(run);
-        if (to !== 'user') {
-          const answer = await this.call(run, to, `[[KIND:reply]]\n${agent} pregunta sobre ${task.id}: ${text}\nResponde brevemente en español.`, { cwd: run.repoPath, label: `Responder a ${agent}` });
-          this.bus.reply(run, message.id, to, answer.ok ? (answer.json?.answer ?? answer.text) : `No pude responder: ${answer.error}`);
-        }
-        const reply = await promise;
-        task.status = 'running';
-        this.touch(run);
-        if (!reply) throw new Error(`La pregunta de ${task.id} agotó el tiempo de espera.`);
-        const wt = run.worktrees[agent];
-        response = await this.call(run, agent, `[[KIND:resume]]\nContinúa ${task.id} en esta copia. Respuesta de ${to}: ${reply.text}\nTermina con el bloque JSON de resumen habitual.`, { cwd: wt.path, mode: 'write', label: `${task.id}: continuar tras respuesta` });
-        if (!response.ok) throw new Error(response.error);
-        for (const m of response.json?.messages ?? []) if (m?.text && !m.kind) this.post(run, agent, String(m.to ?? 'all'), m.text);
+    let session = { id: response.sessionId ?? null, resume: Boolean(response.sessionId) };
+    for (let round = 0; round < MAX_SIGNAL_ROUNDS; round++) {
+      const signals = [];
+      for (const m of response.json?.messages ?? []) {
+        if (!m?.text) continue;
+        if (['ask', 'escalate', 'escalation'].includes(m.kind)) signals.push(m);
+        else this.post(run, agent, String(m.to ?? 'all'), m.text);
       }
+      for (const line of String(response.text ?? '').split(/\r?\n/)) {
+        const match = line.match(/^\[\[(ASK|ESCALATE):([^:\]]+):([^\]]+)\]\]\s*(.+)$/);
+        if (match) signals.push({ kind: match[1].toLowerCase(), to: match[2], text: match[4], threadId: match[3] });
+      }
+      if (!signals.length) break;
+      let resumeContext = '';
+      for (const signal of signals) {
+        const to = String(signal.to ?? 'user');
+        const text = String(signal.text ?? '').trim();
+        if (!text) continue;
+        if (signal.kind === 'escalate' || signal.kind === 'escalation') {
+          this.bus.post(run, { from: agent, to: 'user', text, kind: 'escalation', taskId: task.id });
+          const gate = this.bus.gate(run, { kind: 'escalation', question: text, options: ['continue', 'cancel'], defaultChoice: 'continue' });
+          task.status = 'escalated';
+          this.touch(run);
+          const choice = await this.bus.waitForGate(gate, loadConfig().bus?.gateTimeoutMs, run);
+          this.checkCancelled(run);
+          if (choice !== 'continue') throw new Error(`Escalación de ${task.id} cancelada.`);
+          task.status = 'running';
+          resumeContext += `\nEscalación: ${text}\nDecisión: continuar.`;
+        } else if (signal.kind === 'ask') {
+          if (to === 'all' || to === agent || (to !== 'user' && !run.agents.includes(to))) {
+            this.log(run, agent, `Aviso: pregunta a destinatario inválido (${to}); publicada como nota.`);
+            this.post(run, agent, 'all', text);
+            continue;
+          }
+          const { message, promise } = this.bus.ask(run, { from: agent, to, text, taskId: task.id, timeoutMs: loadConfig().bus?.askTimeoutMs });
+          task.status = 'waiting_reply';
+          this.touch(run);
+          if (to !== 'user') {
+            const answer = await this.call(run, to, `[[KIND:reply]]\n${agent} pregunta sobre ${task.id}: ${text}\nResponde brevemente en español.`, { cwd: run.repoPath, label: `Responder a ${agent}` });
+            if (message.status === 'pending') this.bus.reply(run, message.id, to, answer.ok ? (answer.json?.answer ?? answer.text) : `No pude responder: ${answer.error}`);
+          }
+          const reply = await promise;
+          task.status = 'running';
+          this.touch(run);
+          if (!reply) this.log(run, agent, `La pregunta de ${task.id} agotó el tiempo; el agente decidirá.`);
+          resumeContext += `\nPregunta: ${text}\nRespuesta de ${to}: ${reply?.text ?? 'Sin respuesta; decide tú con el contexto disponible.'}`;
+        }
+      }
+      if (!resumeContext) break;
+      const fullPrompt = `${P.taskPrompt(run, task, agent)}\n\n[[KIND:resume]]${resumeContext}\nContinúa la subtarea y termina con el bloque JSON de resumen habitual.`;
+      response = await this.call(run, agent, session.resume ? `[[KIND:resume]]${resumeContext}\nContinúa ${task.id} y termina con el bloque JSON de resumen habitual.` : fullPrompt, {
+        cwd: run.worktrees[agent].path, mode: 'write', label: `${task.id}: continuar tras respuesta`, session, fallbackPrompt: fullPrompt,
+      });
+      if (!response.ok) throw new Error(response.error);
+      session = { id: response.sessionId ?? session.id, resume: Boolean(response.sessionId ?? session.id) };
+      if (round === MAX_SIGNAL_ROUNDS - 1) this.log(run, agent, `Aviso: ${task.id} alcanzó el límite de rondas de señales.`);
     }
     return response;
   }
@@ -342,7 +362,7 @@ export class Orchestrator extends EventEmitter {
       child.cancelled = true;
       killTree(child);
     }
-    for (const t of run.tasks) if (t.status === 'running' || t.status === 'pending') t.status = 'cancelled';
+    for (const t of run.tasks) if (['running', 'pending', 'waiting_reply', 'escalated'].includes(t.status)) t.status = 'cancelled';
     this.setStatus(run, 'cancelled', 'Cancelado por el usuario');
     return this.publicRun(run);
   }
@@ -449,7 +469,7 @@ export class Orchestrator extends EventEmitter {
   bestAlternative(run, task) {
     const candidates = this.available(run).filter((a) => !task.failedBy.includes(a) && canDo(a, task.requires));
     if (!candidates.length) return null;
-    const load = (a) => run.tasks.filter((t) => t.assignee === a && (t.status === 'pending' || t.status === 'running')).length;
+    const load = (a) => run.tasks.filter((t) => t.assignee === a && ['pending', 'running', 'waiting_reply', 'escalated'].includes(t.status)).length;
     return candidates.reduce((best, a) => {
       const s = (task.bids[a]?.score ?? 0) - LOAD_PENALTY * load(a);
       const b = (task.bids[best]?.score ?? 0) - LOAD_PENALTY * load(best);
@@ -477,7 +497,7 @@ export class Orchestrator extends EventEmitter {
     for (const agent of new Set(run.tasks.map((t) => t.assignee))) await this.ensureWorktree(run, agent);
     this.touch(run);
 
-    const terminal = (t) => !['pending', 'running'].includes(t.status);
+    const terminal = (t) => !['pending', 'running', 'waiting_reply', 'escalated'].includes(t.status);
     const running = new Map(); // agente -> promesa de su subtarea en curso
 
     // Planificador: cada IA hace una subtarea a la vez; una subtarea arranca cuando sus dependencias han terminado.

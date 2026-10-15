@@ -5,12 +5,12 @@ import path from 'node:path';
 import { DATA_DIR, loadConfig } from './config.js';
 import { killTree } from './runner.js';
 
-const DIR = path.join(DATA_DIR, 'terminals');
+const historyDir = () => process.env.AITEAM_TERMINALS_DIR || path.join(DATA_DIR, 'terminals');
 const MAX_OUTPUT = 80_000;
 const MAX_HISTORY = 100;
 const active = new Map();
 const keyFor = (kind, id) => `${kind}-${id}`;
-const fileFor = (kind, id) => path.join(DIR, `${keyFor(kind, id)}.json`);
+const fileFor = (kind, id) => path.join(historyDir(), `${keyFor(kind, id)}.json`);
 const tail = (value) => value.length > MAX_OUTPUT ? value.slice(-MAX_OUTPUT) : value;
 
 function readHistory(kind, id) {
@@ -23,7 +23,7 @@ function saveHistory(kind, id, entry) {
   const index = items.findIndex((item) => item.id === entry.id);
   if (index < 0) items.push(entry);
   else items[index] = entry;
-  fs.mkdirSync(DIR, { recursive: true });
+  fs.mkdirSync(historyDir(), { recursive: true });
   fs.writeFileSync(fileFor(kind, id), JSON.stringify(items.slice(-MAX_HISTORY), null, 2));
 }
 

@@ -422,7 +422,9 @@ export class ChatManager extends EventEmitter {
       planHead = (await G.git(chat.worktree.path, ['rev-parse', 'HEAD'], { allowFail: true })).stdout.trim() || null;
     }
 
-    const snapshotId = await Snapshots.beforeTurn(chat);
+    let snapshotId = null;
+    try { snapshotId = await Snapshots.beforeTurn(chat); }
+    catch (err) { this.emit('activity', { chatId: chat.id, agent: 'system', text: `Aviso: no se pudo crear la instantánea: ${err.message}` }); }
     let res;
     try {
       res = await invokeAgent(agent, {
@@ -437,7 +439,10 @@ export class ChatManager extends EventEmitter {
       });
     } finally {
       q.child = null;
-      await Snapshots.afterTurn(chat, snapshotId);
+      if (snapshotId) {
+        try { await Snapshots.afterTurn(chat, snapshotId); }
+        catch (err) { this.emit('activity', { chatId: chat.id, agent: 'system', text: `Aviso: no se pudo cerrar la instantánea: ${err.message}` }); }
+      }
       this.save(chat);
     }
 
@@ -580,6 +585,7 @@ export class ChatManager extends EventEmitter {
     const chat = this.chats.get(id);
     if (!chat) throw new Error('No existe esa conversación.');
     this.stop(id);
+    await Snapshots.remove(chat);
     await G.removeWorktree(chat.repoPath, chat.worktree.path);
     fs.rmSync(path.join(CHATS_DIR, `${id}.json`), { force: true });
     this.chats.delete(id);

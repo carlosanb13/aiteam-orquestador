@@ -22,7 +22,7 @@ export class Bus {
       ts: now(), from, to, kind, taskId: taskId || null, text: String(text).slice(0, 8000),
       status: kind === 'ask' ? 'pending' : 'sent' };
     run.messages.push(message);
-    run.board.push({ ts: message.ts, from, to, text: message.text });
+    if (kind !== 'worker_done' && kind !== 'reply') run.board.push({ ts: message.ts, from, to, text: message.text });
     this.owner.touch(run);
     this.owner.emit('bus-message', { runId: run.id, message });
     return message;
@@ -91,9 +91,19 @@ export class Bus {
     return gate;
   }
 
-  waitForGate(gate) {
+  waitForGate(gate, timeoutMs = 300_000, run = null) {
     if (gate.status === 'decided') return Promise.resolve(gate.choice);
-    return new Promise((resolve) => this.waiters.set(gate.id, { resolve }));
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.waiters.delete(gate.id);
+        if (gate.status === 'pending') {
+          Object.assign(gate, { status: 'decided', choice: gate.default ?? 'continue', decidedBy: 'timeout', decidedAt: now() });
+          if (run) { this.owner.touch(run); this.owner.emit('bus-gate', { runId: run.id, gate }); }
+        }
+        resolve(gate.choice);
+      }, Math.max(1, Math.min(Number(timeoutMs) || 300_000, 3_600_000)));
+      this.waiters.set(gate.id, { resolve: (choice) => { clearTimeout(timer); resolve(choice); }, timer });
+    });
   }
 
   cancel(run) {

@@ -74,8 +74,8 @@ function summarizers(chat, available) {
  * Resume los mensajes antiguos de `msgs` (todos menos los `keepRecent` últimos de conversación).
  * Devuelve true si se generó un resumen nuevo.
  */
-export async function compact(manager, chat, msgs, { render, available, onEvent, force = false } = {}) {
-  const cfg = compactionConfig();
+export async function compact(manager, chat, msgs, { render, available, onEvent, force = false, summarize = invokeAgent, config = compactionConfig() } = {}) {
+  const cfg = config;
   if (!cfg.enabled && !force) return false;
   const pending = conversational(sinceSummary(chat, msgs));
   const old = pending.slice(0, Math.max(0, pending.length - cfg.keepRecent));
@@ -87,7 +87,7 @@ export async function compact(manager, chat, msgs, { render, available, onEvent,
 
   onEvent?.(`🗜 Compactando ${old.length} mensajes antiguos…`);
   for (const agent of summarizers(chat, available)) {
-    const res = await invokeAgent(agent, {
+    const res = await summarize(agent, {
       prompt,
       cwd: chat.worktree.path,
       mode: 'read',
@@ -127,9 +127,9 @@ export async function compact(manager, chat, msgs, { render, available, onEvent,
  * Historial que se envía a una IA: resumen (si lo hay) + mensajes posteriores.
  * Con `allowCompact`, si supera el umbral se compacta antes de devolverlo.
  */
-export async function history(manager, chat, msgs, { render, available, onEvent, allowCompact = true } = {}) {
+export async function history(manager, chat, msgs, { render, available, onEvent, allowCompact = true, summarize, config = compactionConfig() } = {}) {
   const build = () => summaryBlock(chat) + render(conversational(sinceSummary(chat, msgs)).slice(-MAX_RECENT));
   let text = build();
-  if (allowCompact && overThreshold(text) && (await compact(manager, chat, msgs, { render, available, onEvent }))) text = build();
+  if (allowCompact && text.length > config.thresholdChars && (await compact(manager, chat, msgs, { render, available, onEvent, summarize, config }))) text = build();
   return text;
 }
