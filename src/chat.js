@@ -3,10 +3,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import * as G from './git.js';
+import * as Snapshots from './snapshots.js';
 import { AGENTS, invokeAgent } from './agents.js';
 import { DATA_DIR, loadConfig } from './config.js';
 import { killTree } from './runner.js';
 import { canDo, describeRequires, detectRequires } from './capabilities.js';
+import { projectRules } from './prompts.js';
+import { chatMode, invokeMode, modeText, resolveSlash, setChatMode } from './commands.js';
+import * as Compaction from './compaction.js';
 
 const CHATS_DIR = path.join(DATA_DIR, 'chats');
 const MAX_HOPS = 4;
@@ -33,6 +37,20 @@ const short = (s, n = 160) => {
   const one = String(s ?? '').replace(/\s+/g, ' ').trim();
   return one.length > n ? `${one.slice(0, n)}…` : one;
 };
+
+/**
+ * Garantía del modo plan: devuelve la copia al commit de antes del turno y borra lo no versionado.
+ * Devuelve true si la IA había dejado cambios (archivos o commits propios).
+ */
+export async function revertPlanWrites(worktree, head) {
+  const status = await G.git(worktree, ['status', '--porcelain'], { allowFail: true });
+  const now = (await G.git(worktree, ['rev-parse', 'HEAD'], { allowFail: true })).stdout.trim();
+  const moved = Boolean(head && now && now !== head);
+  if (!status.stdout.trim() && !moved) return false;
+  await G.git(worktree, ['reset', '-q', '--hard', head || 'HEAD'], { allowFail: true });
+  await G.git(worktree, ['clean', '-fdq'], { allowFail: true });
+  return true;
+}
 
 /** Menciones del usuario: "@claude haz X" o "@equipo ...". */
 export function parseMentions(text, members) {
@@ -94,7 +112,7 @@ function transcript(messages) {
     .join('\n\n');
 }
 
-function chatPrompt(chat, agent, request, history, isNewSession, hop) {
+function chatPrompt(chat, agent, request, history, isNewSession, hop, mode) {
   const others = chat.agents.filter((a) => a !== agent && !chat.exhausted?.[a]);
   return `[[KIND:chat]] [[HOP:${hop}]]
 Eres @${AGENTS[agent].handle} (${AGENTS[agent].name}) y formas parte de AITeam, un equipo de IAs que conversa en un chat compartido con el usuario y entre sí.
@@ -105,7 +123,7 @@ ${teamText(chat.agents)}
 MODO: ${(chat.autonomy ?? loadConfig().autonomy) === 'full'
     ? 'CONTROL TOTAL. Puedes ejecutar comandos, instalar dependencias y herramientas, lanzar servidores, usar la web y tus servidores MCP sin pedir permiso. Úsalo con responsabilidad: nada destructivo fuera del proyecto sin que el usuario lo pida.'
     : 'SEGURO. Solo puedes editar archivos; no puedes ejecutar comandos. Si necesitas instalar o ejecutar algo, dilo y pide al usuario que active "Control total".'}
-
+${modeText(mode)}${projectRules(chat.worktree.path, agent)}
 ESPACIO DE TRABAJO: el directorio actual es una copia del proyecto del usuario${chat.repoPath ? ` (${chat.repoPath})` : ''} compartida por todo el equipo en esta conversación. Puedes leer y modificar archivos; tus cambios quedan guardados y tus compañeros los verán. El usuario decidirá después si los aplica a su proyecto.
 
 ${isNewSession ? 'CONVERSACIÓN HASTA AHORA' : 'MENSAJES NUEVOS DESDE TU ÚLTIMO TURNO'}:
@@ -146,7 +164,7 @@ export class ChatManager extends EventEmitter {
   list() {
     return [...this.chats.values()]
       .sort((a, b) => (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt))
-      .map((c) => ({ id: c.id, title: c.title, createdAt: c.createdAt, updatedAt: c.updatedAt, agents: c.agents, repoPath: c.repoPath, branch: c.worktree?.branch, working: c.working }));
+      .map((c) => ({ id: c.id, title: c.title, createdAt: c.createdAt, updatedAt: c.updatedAt, agents: c.agents, repoPath: c.repoPath, branch: c.worktree?.branch, working: c.working, mode: chatMode(c) }));
   }
 
   get(id) {
@@ -242,14 +260,37 @@ export class ChatManager extends EventEmitter {
     text = String(text ?? '').trim();
     if (!text) throw new Error('Escribe un mensaje.');
 
-    // /equipo <objetivo> lanza una tarea de equipo completa (planificar, negociar, paralelo, revisión).
-    const team = text.match(/^\/equipo\s+([\s\S]+)/i);
-    if (team) {
+    // Comandos "/": /equipo, /plan, /build, /compact y los personalizados de .aiteam/commands (ver commands.js).
+    const slash = resolveSlash(chat, text);
+    let mode;
+    let meta;
+    if (slash?.kind === 'team') {
+      // /equipo <objetivo> lanza una tarea de equipo completa (planificar, negociar, paralelo, revisión).
       const msg = this.addMessage(chat, { from: 'user', text });
-      this.launchTeamTask(chat, team[1].trim()).catch((err) =>
+      this.launchTeamTask(chat, slash.goal).catch((err) =>
         this.addMessage(chat, { from: 'system', kind: 'error', text: `No se pudo lanzar la tarea de equipo: ${err.message}` }),
       );
       return msg;
+    }
+    if (slash?.kind === 'compact') {
+      const msg = this.addMessage(chat, { from: 'user', text });
+      this.enqueue(chat, { run: () => this.compactNow(chat) });
+      return msg;
+    }
+    if (slash?.kind === 'mode' && !slash.text) {
+      const msg = this.addMessage(chat, { from: 'user', text });
+      setChatMode(this, chat, slash.mode);
+      return msg;
+    }
+    if (slash?.kind === 'mode') {
+      // "/plan texto": solo este mensaje va en ese modo.
+      text = slash.text;
+      mode = slash.mode;
+    }
+    if (slash?.kind === 'custom') {
+      meta = { command: slash.command, input: text };
+      mode = slash.mode ?? undefined;
+      text = slash.agent && chat.agents.includes(slash.agent) && !parseMentions(slash.text, chat.agents).length ? `@${AGENTS[slash.agent].handle} ${slash.text}` : slash.text;
     }
 
     let targets = parseMentions(text, chat.agents);
@@ -259,8 +300,8 @@ export class ChatManager extends EventEmitter {
       targets = [last?.from && chat.agents.includes(last.from) ? last.from : chat.agents[0]];
     }
     if (chat.title === 'Nueva conversación') chat.title = short(text.replace(/@\w+/g, ''), 60) || chat.title;
-    const msg = this.addMessage(chat, { from: 'user', text, to: targets });
-    for (const agent of targets) this.enqueue(chat, { agent, request: msg, hop: 0 });
+    const msg = this.addMessage(chat, { from: 'user', text, to: targets, ...(mode || meta ? { meta: { ...meta, ...(mode && { mode }) } } : {}) });
+    for (const agent of targets) this.enqueue(chat, { agent, request: msg, hop: 0, mode });
     return msg;
   }
 
@@ -297,6 +338,17 @@ export class ChatManager extends EventEmitter {
     return chat;
   }
 
+  /** /compact o la API: resume ya los mensajes antiguos. Se ejecuta en la cola, entre turnos. */
+  async compactNow(chat) {
+    const emit = (text) => this.emit('activity', { chatId: chat.id, agent: 'system', text });
+    try {
+      const done = await Compaction.compact(this, chat, chat.messages, { render: transcript, available: this.available(chat), onEvent: emit, force: true });
+      if (!done) this.addMessage(chat, { from: 'system', kind: 'notice', text: 'No hay mensajes antiguos suficientes para compactar (o ninguna IA pudo resumirlos).' });
+    } catch (err) {
+      this.addMessage(chat, { from: 'system', kind: 'error', text: `No se pudo compactar el historial: ${err.message}` });
+    }
+  }
+
   // Las IAs de una conversación hablan por turnos: comparten la misma copia del proyecto.
   async pump(chat) {
     const q = this.queues.get(chat.id);
@@ -306,7 +358,7 @@ export class ChatManager extends EventEmitter {
     try {
       while (q.items.length) {
         const item = q.items.shift();
-        await this.turn(chat, item, q);
+        await (item.run ? item.run() : this.turn(chat, item, q));
       }
     } finally {
       q.running = false;
@@ -315,7 +367,7 @@ export class ChatManager extends EventEmitter {
     }
   }
 
-  async turn(chat, { agent, request, hop, relayedFrom }, q) {
+  async turn(chat, { agent, request, hop, relayedFrom, mode: modeOverride }, q) {
     if (this.isExhausted(chat, agent)) {
       const requires = detectRequires(request.text);
       const alt = this.available(chat).find((a) => a !== agent && canDo(a, requires));
@@ -335,11 +387,13 @@ export class ChatManager extends EventEmitter {
     chat.working = { agent, since: new Date().toISOString() };
     this.save(chat);
 
-    const session = chat.sessions[agent] ?? { id: agent === 'claude' ? crypto.randomUUID() : null, resume: false, seen: 0 };
-    const isNew = !session.resume || AGENTS[agent]?.custom;
+    const freshSession = () => ({ id: agent === 'claude' ? crypto.randomUUID() : null, resume: false, seen: 0 });
+    let session = chat.sessions[agent] ?? freshSession();
     const msgs = chat.messages.filter((m) => m.id !== request.id);
-    const full = transcript(msgs.slice(-40));
     const delta = transcript(msgs.slice(session.seen).filter((m) => m.from !== agent));
+    // Si lo nuevo desde su último turno ya es enorme, se le manda el historial compactado completo.
+    const isNew = !session.resume || AGENTS[agent]?.custom || Compaction.overThreshold(delta);
+    const mode = chatMode(chat, modeOverride);
     const fromLabel = request.from === 'user' ? 'USUARIO' : `@${AGENTS[request.from]?.handle ?? request.from}`;
     const req = {
       fromLabel,
@@ -354,18 +408,48 @@ export class ChatManager extends EventEmitter {
       if (activity.length > 300) activity.shift();
       this.emit('activity', { chatId: chat.id, agent, text });
     };
+    const full = await Compaction.history(this, chat, msgs, { render: transcript, available: this.available(chat), onEvent, allowCompact: isNew });
+    // Si se envía el historial completo (compactado o no), reanudar la sesión antigua lo duplicaría
+    // encima de su contexto: se abre una nueva.
+    if (isNew && session.resume) session = freshSession();
 
-    const res = await invokeAgent(agent, {
-      prompt: chatPrompt(chat, agent, req, isNew ? full : delta, isNew, hop),
-      fallbackPrompt: chatPrompt(chat, agent, req, full, true, hop),
-      cwd: chat.worktree.path,
-      mode: 'write',
-      autonomy: chat.autonomy ?? loadConfig().autonomy,
-      session,
-      onEvent,
-      onSpawn: (child) => (q.child = child),
-    });
-    q.child = null;
+    // Modo plan: lo pendiente se guarda antes del turno para poder deshacer después cualquier escritura
+    // de la IA, sea cual sea su CLI (Antigravity y los conectores personalizados no tienen modo de solo lectura).
+    const readOnly = mode === 'plan';
+    let planHead = null;
+    if (readOnly) {
+      await G.commitAll(chat.worktree.path, '[aiteam] cambios pendientes antes del modo plan').catch(() => {});
+      planHead = (await G.git(chat.worktree.path, ['rev-parse', 'HEAD'], { allowFail: true })).stdout.trim() || null;
+    }
+
+    let snapshotId = null;
+    try { snapshotId = await Snapshots.beforeTurn(chat); }
+    catch (err) { this.emit('activity', { chatId: chat.id, agent: 'system', text: `Aviso: no se pudo crear la instantánea: ${err.message}` }); }
+    let res;
+    try {
+      res = await invokeAgent(agent, {
+        prompt: chatPrompt(chat, agent, req, isNew ? full : delta, isNew, hop, mode),
+        fallbackPrompt: chatPrompt(chat, agent, req, full, true, hop, mode),
+        cwd: chat.worktree.path,
+        mode: invokeMode(mode),
+        autonomy: chat.autonomy ?? loadConfig().autonomy,
+        session,
+        onEvent,
+        onSpawn: (child) => (q.child = child),
+      });
+    } finally {
+      q.child = null;
+      if (snapshotId) {
+        try { await Snapshots.afterTurn(chat, snapshotId); }
+        catch (err) { this.emit('activity', { chatId: chat.id, agent: 'system', text: `Aviso: no se pudo cerrar la instantánea: ${err.message}` }); }
+      }
+      this.save(chat);
+    }
+
+    if (readOnly && (await revertPlanWrites(chat.worktree.path, planHead))) {
+      onEvent('↩ Modo plan: se han deshecho los cambios en archivos.');
+      this.addMessage(chat, { from: 'system', kind: 'notice', text: `${AGENTS[agent].name} intentó modificar archivos en modo plan; se han deshecho los cambios. Usa /build si quieres aplicarlos.` });
+    }
 
     if (!res.ok) {
       if (res.cancelled || q.stopped) {
@@ -394,7 +478,7 @@ export class ChatManager extends EventEmitter {
       }
       if (alt) {
         this.addMessage(chat, { from: 'system', kind: 'notice', text: `${AGENTS[alt].name} se encarga en su lugar.` });
-        q.items.unshift({ agent: alt, request, hop, relayedFrom: agent });
+        q.items.unshift({ agent: alt, request, hop, relayedFrom: agent, mode: modeOverride });
       }
       return;
     }
@@ -432,7 +516,8 @@ export class ChatManager extends EventEmitter {
         });
         break;
       }
-      q.items.push({ agent: d.to, request: { ...reply, text: d.text, from: agent, id: reply.id }, hop: hop + 1 });
+      // Las delegaciones heredan el modo de la petición original (p. ej. un /plan de un solo mensaje).
+      q.items.push({ agent: d.to, request: { ...reply, text: d.text, from: agent, id: reply.id }, hop: hop + 1, mode: modeOverride });
     }
   }
 
@@ -500,6 +585,7 @@ export class ChatManager extends EventEmitter {
     const chat = this.chats.get(id);
     if (!chat) throw new Error('No existe esa conversación.');
     this.stop(id);
+    await Snapshots.remove(chat);
     await G.removeWorktree(chat.repoPath, chat.worktree.path);
     fs.rmSync(path.join(CHATS_DIR, `${id}.json`), { force: true });
     this.chats.delete(id);
