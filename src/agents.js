@@ -8,7 +8,8 @@ import { recordClaudeRateLimit, recordCall, touchUsage } from './usage.js';
 export const AGENTS = {
   claude: { id: 'claude', name: 'Claude', vendor: 'Anthropic · Claude Code', cli: 'claude', color: '#d97757' },
   codex: { id: 'codex', name: 'ChatGPT', vendor: 'OpenAI · Codex CLI', cli: 'codex', color: '#10a37f' },
-  gemini: { id: 'gemini', name: 'Gemini', vendor: 'Google · Gemini CLI', cli: 'gemini', color: '#4285f4' },
+  // Google retiró Gemini CLI para cuentas personales (incl. Google AI Pro); su sustituto es Antigravity CLI (agy).
+  gemini: { id: 'gemini', name: 'Gemini', vendor: 'Google · Antigravity CLI', cli: 'agy', color: '#4285f4' },
 };
 
 export const MOCK = process.argv.includes('--mock') || process.env.AITEAM_MOCK === '1';
@@ -116,33 +117,60 @@ function codexResult(res, state) {
   return { ok: true, text: state.lastMessage, sessionId: state.sessionId };
 }
 
-// ---------------------------------------------------------------- Gemini CLI
+// ---------------------------------------------------------------- Antigravity CLI (Gemini)
 
-function geminiArgs(mode, autonomy, model, session) {
-  // El prompt va por stdin; -p vacío activa el modo headless (con shell en Windows hay que citarlo).
-  const args = ['-p', process.platform === 'win32' ? '""' : '', '--output-format', 'json', '--skip-trust'];
-  if (mode === 'write') args.push('--approval-mode', autonomy === 'full' ? 'yolo' : 'auto_edit');
-  else args.push('--approval-mode', 'default');
-  // Gemini guarda las sesiones por carpeta; cada conversación tiene la suya, así que "latest" es la correcta.
-  if (session?.resume) args.push('--resume', 'latest');
-  if (model) args.push('-m', model);
+function agyArgs(mode, autonomy, model, session) {
+  // El prompt va por stdin como NDJSON; "-p=" (vacío) activa el modo no interactivo.
+  const args = ['--input-format', 'stream-json', '--output-format', 'stream-json'];
+  if (mode === 'write') {
+    if (autonomy === 'full') args.push('--dangerously-skip-permissions');
+    else args.push('--mode', 'accept-edits');
+  }
+  if (session?.resume && session.id) args.push('--conversation', session.id);
+  if (model) args.push('--model', model);
+  args.push('-p=');
   return args;
 }
 
-function geminiResult(res) {
-  const start = res.stdout.indexOf('{');
-  let parsed = null;
-  if (start >= 0) {
-    try {
-      parsed = JSON.parse(res.stdout.slice(start));
-    } catch {
-      parsed = null;
-    }
+const AGY_QUIET_STEPS = new Set(['user_input', 'agent_response', 'planner_response', 'checkpoint']);
+
+function agyLine(line, state, onEvent) {
+  let ev;
+  try {
+    ev = JSON.parse(line);
+  } catch {
+    return;
   }
-  if (parsed?.error) return { ok: false, error: short(parsed.error.message ?? JSON.stringify(parsed.error), 1500) };
-  if (parsed?.response != null) return { ok: true, text: parsed.response };
-  const err = res.stderr.match(/(IneligibleTierError|Error[^\n]*)/)?.[0];
-  return { ok: false, error: short(err ?? tail(res.stderr || res.stdout) ?? 'Gemini no devolvió respuesta.', 1500) };
+  if (ev.event === 'init') {
+    state.sessionId = ev.conversation_id;
+  } else if (ev.event === 'step_update') {
+    const st = ev.step_update ?? {};
+    if (st.step_type === 'agent_response' && st.text_delta) {
+      state.text = (state.text ?? '') + st.text_delta;
+    } else if (st.state === 'DONE' && st.step_type && !AGY_QUIET_STEPS.has(st.step_type)) {
+      const detail = st.title ?? st.summary ?? st.tool_name ?? st.command ?? st.file_path ?? '';
+      onEvent(`🔧 ${st.step_type.replace(/_/g, ' ')} ${short(detail, 120)}`);
+    }
+    if (st.step_type === 'agent_response' && st.state === 'DONE' && state.text?.trim()) {
+      onEvent(short(state.text));
+      state.text = '';
+    }
+  } else if (ev.event === 'result') {
+    state.final = ev.result;
+  }
+}
+
+function agyResult(res, state) {
+  const r = state.final;
+  if (!r) {
+    const err = res.stderr.match(/Error[^\n]*/)?.[0];
+    return { ok: false, error: short(err ?? (tail(res.stderr || res.stdout) || 'Antigravity no devolvió respuesta.'), 1500) };
+  }
+  if (r.status !== 'SUCCESS') {
+    const msg = typeof r.error === 'string' ? r.error : (r.error?.message ?? JSON.stringify(r.error ?? r.status));
+    return { ok: false, error: short(msg, 1500) };
+  }
+  return { ok: true, text: r.response ?? '', sessionId: r.conversation_id ?? state.sessionId };
 }
 
 // ---------------------------------------------------------------- Simulación
@@ -246,13 +274,15 @@ async function invokeOnce(agentId, { prompt, cwd, mode = 'read', onEvent, onSpaw
     args = codexArgs(mode, autonomy, model, session);
     onLine = (l) => codexLine(l, state, emit);
   } else if (agentId === 'gemini') {
-    args = geminiArgs(mode, autonomy, model, session);
+    args = agyArgs(mode, autonomy, model, session);
+    onLine = (l) => agyLine(l, state, emit);
   } else {
     throw new Error(`IA desconocida: ${agentId}`);
   }
 
   recordCall(agentId);
-  const res = await runProcess(AGENTS[agentId].cli, args, { cwd, input: prompt, timeoutMs: timeout, onLine, onSpawn });
+  const input = agentId === 'gemini' ? `${JSON.stringify({ event: 'user', message: { content: prompt } })}\n` : prompt;
+  const res = await runProcess(AGENTS[agentId].cli, args, { cwd, input, timeoutMs: timeout, onLine, onSpawn });
   if (agentId === 'codex') touchUsage(); // Codex acaba de escribir su estado de límites en sus registros
   const durationMs = Date.now() - started;
   if (res.cancelled) return { ok: false, cancelled: true, error: 'Cancelado.', durationMs };
@@ -261,7 +291,7 @@ async function invokeOnce(agentId, { prompt, cwd, mode = 'read', onEvent, onSpaw
   let out;
   if (agentId === 'claude') out = claudeResult(res, state);
   else if (agentId === 'codex') out = codexResult(res, state);
-  else out = geminiResult(res);
+  else out = agyResult(res, state);
   return { ...out, durationMs };
 }
 

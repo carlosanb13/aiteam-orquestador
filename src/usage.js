@@ -129,6 +129,6 @@ export function getUsage() {
     callsToday: calls.codex ?? 0,
   };
 
-  out.gemini = { session: null, weekly: null, updatedAt: null, callsToday: calls.gemini ?? 0, note: 'Gemini CLI no informa de su cuota.' };
+  out.gemini = { session: null, weekly: null, updatedAt: null, callsToday: calls.gemini ?? 0, note: 'Antigravity no informa de su cuota.' };
   return out;
 }

@@ -1,6 +1,6 @@
 # AITeam
 
-**Tus IAs trabajando como un equipo.** AITeam junta en una sola app las suscripciones que ya pagas (**Claude Pro**, **ChatGPT Plus** y **Google AI Pro**) a través de sus CLIs oficiales (Claude Code, Codex CLI y Gemini CLI). Hablan entre ellas, se reparten el trabajo según en qué destaca cada una, se revisan y se pasan el relevo cuando a una se le acaba la cuota.
+**Tus IAs trabajando como un equipo.** AITeam junta en una sola app las suscripciones que ya pagas (**Claude Pro**, **ChatGPT Plus** y **Google AI Pro**) a través de sus CLIs oficiales (Claude Code, Codex CLI y Antigravity CLI). Hablan entre ellas, se reparten el trabajo según en qué destaca cada una, se revisan y se pasan el relevo cuando a una se le acaba la cuota.
 
 AITeam es el **orquestador**: las capacidades (programar, ejecutar comandos, instalar dependencias, buscar en la web, usar sus servidores MCP…) las aporta cada IA con su propio CLI. AITeam las conecta, les da contexto compartido y coordina el trabajo.
 
@@ -48,7 +48,7 @@ Tu rama principal nunca se toca: tú decides qué fusionas.
 - Los CLIs que quieras usar, instalados y con la sesión iniciada con tu suscripción:
   - **Claude Code**: `npm i -g @anthropic-ai/claude-code`, y ejecutar `claude` una vez para iniciar sesión.
   - **Codex CLI**: `npm i -g @openai/codex`, y luego `codex login` con tu cuenta de ChatGPT.
-  - **Gemini CLI**: `npm i -g @google/gemini-cli`; ejecuta `gemini` e inicia sesión con la cuenta de Google que tiene AI Pro.
+  - **Antigravity CLI** (`agy`, sustituto de Gemini CLI para cuentas personales): en PowerShell `irm https://antigravity.google/cli/install.ps1 | iex`; ejecuta `agy` una vez e inicia sesión con la cuenta de Google que tiene AI Pro.
 
 ## Uso
 

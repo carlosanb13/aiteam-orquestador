@@ -27,7 +27,7 @@ export const DEFAULT_CONFIG = {
       enabled: true,
       model: '',
       profile:
-        'Contexto muy largo (leer muchos archivos a la vez), documentación, interfaces y frontend, investigación y conocimiento actualizado de librerías.',
+        'Contexto muy largo (leer muchos archivos a la vez), documentación, interfaces y frontend, investigación en la web, generación de imágenes y uso del navegador.',
     },
   },
 };

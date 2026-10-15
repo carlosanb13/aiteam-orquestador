@@ -21,6 +21,8 @@ const ALIASES = {
   openai: 'codex',
   gemini: 'gemini',
   google: 'gemini',
+  antigravity: 'gemini',
+  agy: 'gemini',
 };
 // Errores de sesión: la IA no podrá responder hasta que el usuario vuelva a iniciar sesión.
 const AUTH_ERROR = /IneligibleTier|authenticat|not logged in|login required|please log ?in|unauthori[sz]ed|401/i;
