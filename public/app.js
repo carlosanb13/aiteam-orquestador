@@ -684,14 +684,16 @@ async function openChat(id) {
       .map((a) => {
         const info = agentInfo(a);
         return `<button type="button" class="mention-btn" data-mention="${esc(info.handle ?? a)}" title="${esc(info.vendor ?? '')}">
-          ${emblem(a, 22)}<span><b>@${esc(info.handle ?? a)}</b><small>${esc(info.tagline ?? '')}</small></span></button>`;
+          ${emblem(a, 20)}<span class="mention-copy"><b>@${esc(info.handle ?? a)}</b><small>${esc(info.tagline ?? '')}</small></span></button>`;
       })
       .join('') +
-    `<button type="button" class="mention-btn" data-mention="equipo" title="Todas las IAs de la conversación">${icon('user', 18)}<span><b>@equipo</b><small>Todas responden por turnos</small></span></button>
-     <button type="button" class="mention-btn" data-mention="/equipo" title="Planificar, repartir y trabajar en paralelo">${icon('bolt', 18)}<span><b>/equipo</b><small>Tarea en paralelo con revisión</small></span></button>`;
+    `<button type="button" class="mention-btn" data-mention="equipo" title="Todas las IAs de la conversación">${icon('user', 18)}<span class="mention-copy"><b>@equipo</b><small>Todas responden por turnos</small></span></button>
+     <button type="button" class="mention-btn" data-mention="/equipo" title="Planificar, repartir y trabajar en paralelo">${icon('bolt', 18)}<span class="mention-copy"><b>/equipo</b><small>Tarea en paralelo con revisión</small></span></button>`;
   $('#mentionBar').addEventListener('click', (e) => {
-    const m = e.target.closest('[data-mention]')?.dataset.mention;
+    const button = e.target.closest('[data-mention]');
+    const m = button?.dataset.mention;
     if (!m) return;
+    $('#mentionBar').querySelectorAll('.mention-btn').forEach((item) => item.classList.toggle('selected', item === button));
     const input = $('#chatInput');
     input.value = m.startsWith('/') ? `${m} ${input.value.replace(/^\/equipo\s*/, '')}` : `${input.value}${input.value && !input.value.endsWith(' ') ? ' ' : ''}@${m} `;
     input.focus();

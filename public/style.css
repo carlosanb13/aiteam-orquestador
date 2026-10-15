@@ -504,12 +504,14 @@ button .i { margin-right: 2px; }
 .li-edit { color: var(--warn); }
 .li-checkCircle, .li-merge { color: var(--ok); }
 .li-xCircle, .li-alert { color: var(--err); }
-.mention-bar { gap: 8px; }
-.mention-btn { display: inline-flex; align-items: center; gap: 8px; padding: 5px 10px 5px 6px; text-align: left; border-radius: 10px; }
-.mention-btn span { display: grid; line-height: 1.2; }
+.mention-bar { gap: 6px; }
+.mention-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 9px 4px 6px; text-align: left; border-radius: 9px; white-space: nowrap; }
+.mention-btn.selected { background: var(--panel-2); border-color: var(--accent); }
+.mention-copy { display: inline-flex; align-items: baseline; line-height: 1.2; }
 .mention-btn b { font-size: 12.5px; }
-.mention-btn small { font-size: 10.5px; color: var(--muted); font-weight: 400; white-space: nowrap; }
-.mention-btn > .i { width: 22px; height: 22px; padding: 2px; color: var(--muted); }
+.mention-btn small { display: inline-block; max-width: 0; margin-left: 0; overflow: hidden; opacity: 0; font-size: 10.5px; color: var(--muted); font-weight: 400; white-space: nowrap; vertical-align: baseline; transition: max-width .2s ease, margin-left .2s ease, opacity .15s ease; }
+.mention-btn:hover small, .mention-btn:focus-visible small, .mention-btn.selected small { max-width: 300px; margin-left: 8px; opacity: 1; }
+.mention-btn > .i { width: 20px; height: 20px; padding: 2px; color: var(--muted); }
 .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
 .seg button { border: 0; border-radius: 0; background: transparent; color: var(--muted); }
 .seg button.on { background: var(--panel-2); color: var(--text); font-weight: 600; }
