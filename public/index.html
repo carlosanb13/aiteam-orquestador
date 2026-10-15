@@ -164,10 +164,13 @@
         <div id="agentSettings"></div>
         <div class="shutdown-row">
           <div>
-            <b>Apagar AITeam</b>
-            <div class="muted small-text">Detiene el servidor. Se vuelve a abrir con el acceso directo.</div>
+            <b>Servidor de AITeam</b>
+            <div class="muted small-text">Reinicia para cargar cambios en la lógica (server.js, src/). Los cambios de la interfaz solo necesitan recargar (Ctrl+R).</div>
           </div>
-          <button type="button" class="danger" id="shutdownBtn">Apagar</button>
+          <div class="actions">
+            <button type="button" id="restartBtn">Reiniciar</button>
+            <button type="button" class="danger" id="shutdownBtn">Apagar</button>
+          </div>
         </div>
         <div class="dialog-actions">
           <button value="cancel" class="ghost">Cancelar</button>

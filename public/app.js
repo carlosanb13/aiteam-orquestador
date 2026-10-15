@@ -1323,7 +1323,13 @@ $('#rvApply').addEventListener('click', async () => {
   try {
     const r = await api('POST', `${rvBase()}/apply`);
     if (r.ok) {
-      $('#rvMsg').innerHTML = `<span class="ok-text">${icon('checkCircle')} Aplicados ${r.files} archivo(s) a la rama ${esc(r.branch)} de tu proyecto.</span>`;
+      $('#rvMsg').innerHTML = `<span class="ok-text">${icon('checkCircle')} Aplicados ${r.files} archivo(s) a la rama ${esc(r.branch)} de tu proyecto.</span>${
+        r.selfUpdate ? ' <button class="primary small" id="rvRestart">Reiniciar AITeam ahora</button> <span class="muted small-text">para ver los cambios</span>' : ''
+      }`;
+      $('#rvRestart')?.addEventListener('click', () => {
+        reviewDlg.close();
+        restartAITeam();
+      });
       await loadReview();
       $('#rvMain').innerHTML = '<p class="muted">Todo aplicado.</p>';
     } else if (r.reason === 'conflict' && rv.kind === 'chats') {
@@ -1471,6 +1477,54 @@ $('#accentRow').addEventListener('click', (e) => {
   if (id) setLook('accent', id);
 });
 $('#settingsBtn').addEventListener('click', renderAppearance);
+
+// ------------------------------------------------------------ reiniciar
+
+/** Reinicia el servidor; la página se recarga sola cuando vuelve. */
+async function restartAITeam() {
+  let r;
+  try {
+    r = await fetch('/api/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    if (r.status === 409) {
+      if (!confirm('Hay IAs trabajando ahora mismo y su trabajo se cortará. ¿Reiniciar igualmente?')) return false;
+      r = await fetch('/api/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"force":true}' });
+    }
+  } catch {
+    return false;
+  }
+  if (!r.ok) return false;
+  showRestarting();
+  return true;
+}
+
+function showRestarting() {
+  let ov = document.getElementById('restartOverlay');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'restartOverlay';
+    ov.className = 'restart-overlay';
+    ov.innerHTML = `<div>${icon('refresh', 28)}<h2>Reiniciando AITeam…</h2><p class="muted">La ventana se recargará sola en unos segundos.</p></div>`;
+    document.body.append(ov);
+  }
+  // Por si el aviso de reconexión no llega: comprueba que el servidor vuelve y recarga.
+  const started = Date.now();
+  const poll = async () => {
+    try {
+      const r = await fetch('/api/app', { cache: 'no-store' });
+      if (r.ok && Date.now() - started > 800) return location.reload();
+    } catch {
+      /* todavía arrancando */
+    }
+    if (Date.now() - started < 30_000) setTimeout(poll, 500);
+    else ov.querySelector('p').textContent = 'No ha vuelto a arrancar. Ábrelo desde el acceso directo.';
+  };
+  setTimeout(poll, 700);
+}
+
+$('#restartBtn').addEventListener('click', async () => {
+  $('#settingsDlg').close();
+  await restartAITeam();
+});
 
 // ------------------------------------------------------------ apagar
 

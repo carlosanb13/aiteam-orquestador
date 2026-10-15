@@ -5,6 +5,7 @@ import { Orchestrator } from './src/orchestrator.js';
 import { ChatManager } from './src/chat.js';
 import * as G from './src/git.js';
 import os from 'node:os';
+import { spawn } from 'node:child_process';
 import { AGENTS, MOCK, checkAgent, invokeAgent } from './src/agents.js';
 import { getUsage, onUsageChange } from './src/usage.js';
 import * as Projects from './src/projects.js';
@@ -13,6 +14,44 @@ import { loadConfig, saveConfig } from './src/config.js';
 
 const PORT = Number(process.env.PORT) || 4317;
 const HOST = '127.0.0.1';
+const APP_ROOT = path.resolve(import.meta.dirname);
+const LOG_FILE = path.join(APP_ROOT, 'data', 'servidor.log');
+
+/** ¿Hay alguna IA trabajando? (reiniciar o apagar cortaría su trabajo) */
+function teamBusy() {
+  const activeRun = [...orchestrator.runs.values()].some((r) => ['planning', 'bidding', 'running', 'reviewing', 'integrating', 'attacking', 'testing'].includes(r.status));
+  const activeChat = [...chats.chats.values()].some((c) => c.working);
+  return activeRun || activeChat;
+}
+
+/**
+ * Reinicia el servidor: lanza uno nuevo en segundo plano (espera a que este libere el puerto) y termina.
+ * La ventana se reconecta y se recarga sola.
+ */
+function restartServer() {
+  fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
+  // En Windows el registro puede estar bloqueado por la consola que lanzó este servidor: se usa otro archivo.
+  let log = 'ignore';
+  for (const file of [LOG_FILE, LOG_FILE.replace(/\.log$/, '-reinicio.log')]) {
+    try {
+      log = fs.openSync(file, 'a');
+      break;
+    } catch {
+      /* siguiente */
+    }
+  }
+  const args = [path.join(APP_ROOT, 'server.js'), ...process.argv.slice(2)];
+  const child = spawn(process.execPath, args, {
+    cwd: APP_ROOT,
+    detached: true,
+    windowsHide: true,
+    stdio: ['ignore', log, log],
+    env: { ...process.env, AITEAM_RESTARTED: '1' },
+  });
+  child.unref();
+  console.log('Reiniciando AITeam…');
+  setTimeout(() => process.exit(0), 200);
+}
 const PUBLIC = path.resolve(import.meta.dirname, 'public');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };
 
@@ -70,6 +109,8 @@ function allowedRoots() {
 }
 
 function send(res, status, body) {
+  // Un error después de haber respondido no debe tumbar el servidor.
+  if (res.headersSent) return console.error('Respuesta ya enviada:', body?.error ?? body);
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(body));
 }
@@ -150,6 +191,8 @@ const routes = [
       if (result.ok) {
         saveReview(m[1], t);
         if (t.chat) chats.noticeApplied(t.chat, result);
+        // Si se aplicó al propio AITeam, hace falta reiniciar para cargar el código nuevo.
+        result.selfUpdate = path.resolve(t.repoPath).toLowerCase() === APP_ROOT.toLowerCase();
       }
       send(res, 200, result);
     },
@@ -166,6 +209,17 @@ const routes = [
     },
   ],
   ['POST', /^\/api\/chats\/([\w-]+)\/request-changes$/, async (req, res, m) => send(res, 201, chats.requestChanges(m[1], await readBody(req)))],
+  [
+    'POST',
+    /^\/api\/restart$/,
+    async (req, res) => {
+      const { force } = await readBody(req);
+      if (teamBusy() && !force) return send(res, 409, { error: 'Hay IAs trabajando; si reinicias ahora se cortará su trabajo.', busy: true });
+      restartServer();
+      send(res, 200, { ok: true });
+    },
+  ],
+  ['GET', /^\/api\/app$/, (req, res) => send(res, 200, { root: APP_ROOT, pid: process.pid, startedAt: STARTED_AT })],
   ['GET', /^\/api\/usage$/, (req, res) => send(res, 200, getUsage())],
   [
     'POST',
@@ -300,6 +354,19 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname.startsWith('/api/')) return send(res, 404, { error: 'Ruta no encontrada.' });
   serveStatic(req, res, url);
+});
+
+const STARTED_AT = new Date().toISOString();
+
+// Tras un reinicio, el servidor anterior puede tardar un momento en liberar el puerto: se reintenta.
+let listenAttempts = 0;
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE' && process.env.AITEAM_RESTARTED && listenAttempts++ < 40) {
+    setTimeout(() => server.listen(PORT, HOST), 250);
+    return;
+  }
+  console.error(err.code === 'EADDRINUSE' ? `El puerto ${PORT} ya está en uso: ¿AITeam ya está abierto?` : err);
+  process.exit(1);
 });
 
 server.listen(PORT, HOST, () => {
