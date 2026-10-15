@@ -1,8 +1,69 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { AGENTS } from './agents.js';
 import { loadConfig } from './config.js';
 import { CAPABILITY_IDS, agentCapabilities, capabilitiesText, describeRequires } from './capabilities.js';
 
 const agentNames = () => Object.fromEntries(Object.values(AGENTS).map((a) => [a.id, a.name]));
+
+// ---------------------------------------------------------------- Reglas del proyecto (AGENTS.md / CLAUDE.md)
+
+const RULE_FILES = ['AGENTS.md', 'CLAUDE.md'];
+// Archivos que el propio CLI ya carga por su cuenta: no se repiten en el prompt.
+const NATIVE_RULES = { claude: 'CLAUDE.md', codex: 'AGENTS.md' };
+
+/** Archivos de reglas del proyecto que existen en `dir` (AGENTS.md y/o CLAUDE.md, en ese orden). */
+export function findProjectRules(dir) {
+  if (!dir) return [];
+  return RULE_FILES.map((name) => ({ name, file: path.join(dir, name) })).filter(({ file }) => {
+    try {
+      return fs.statSync(file).isFile();
+    } catch {
+      return false; // no existe
+    }
+  });
+}
+
+/**
+ * Bloque de contexto con las reglas del proyecto que aplican a `agentId`, o '' si no hay ninguna.
+ * Se incluyen todos los archivos presentes salvo el que su CLI ya carga por su cuenta (así Claude
+ * recibe AGENTS.md y conserva CLAUDE.md, Codex al revés); si dos archivos son idénticos, va solo uno.
+ */
+export function projectRules(dir, agentId) {
+  const cfg = loadConfig().projectRules ?? {};
+  if (cfg.enabled === false) return '';
+  const native = NATIVE_RULES[agentId];
+  let nativeText = null;
+  if (native) {
+    try {
+      nativeText = fs.readFileSync(path.join(dir, native), 'utf8').trim();
+    } catch {
+      /* no existe */
+    }
+  }
+  const seen = new Set(nativeText ? [nativeText] : []);
+  const parts = [];
+  for (const found of findProjectRules(dir)) {
+    if (found.name === native) continue;
+    let text;
+    try {
+      text = fs.readFileSync(found.file, 'utf8').trim();
+    } catch {
+      continue;
+    }
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    parts.push({ name: found.name, text });
+  }
+  if (!parts.length) return '';
+  let budget = cfg.maxChars ?? 20_000;
+  const blocks = parts.map(({ name, text }) => {
+    const body = text.length > budget ? `${text.slice(0, Math.max(0, budget))}\n…(recortado)` : text;
+    budget = Math.max(0, budget - text.length);
+    return `REGLAS DEL PROYECTO (${name}; síguelas mientras no contradigan estas instrucciones):\n${body}`;
+  });
+  return `\n${blocks.join('\n\n')}\n`;
+}
 
 const JSON_RULE = `Termina SIEMPRE tu respuesta con un bloque JSON válido delimitado exactamente así:
 <<<JSON
@@ -43,7 +104,7 @@ ${capabilitiesText(run.agents, agentNames())}
 
 ARCHIVOS DEL REPOSITORIO:
 ${files || '(repositorio vacío)'}
-
+${projectRules(run.repoPath, run.coordinator)}
 Puedes leer archivos del repositorio para entender el contexto, pero NO modifiques nada.
 
 Divide el objetivo en entre 2 y 8 subtareas concretas. Reglas:
@@ -98,7 +159,7 @@ ${planText(run)}
 
 TABLERO DE MENSAJES DEL EQUIPO:
 ${boardText(run, agentId)}
-${deps ? `\nTRABAJO PREVIO DEL QUE DEPENDES (ya está fusionado en tu copia):\n${deps}\n` : ''}
+${deps ? `\nTRABAJO PREVIO DEL QUE DEPENDES (ya está fusionado en tu copia):\n${deps}\n` : ''}${projectRules(run.worktrees?.[agentId]?.path ?? run.repoPath, agentId)}
 TU SUBTAREA AHORA: ${task.id} — ${task.title}
 ${task.description}
 

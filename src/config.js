@@ -13,6 +13,12 @@ export const DEFAULT_CONFIG = {
   // Dictado: "browser" usa el reconocimiento del navegador; "local" usa Whisper en este PC, sin internet.
   speech: { engine: 'browser', model: 'base', language: 'es' },
   notifications: { enabled: true, sound: true },
+  // Compactación del historial de las conversaciones (ver compaction.js): cuando lo que se envía a una IA
+  // supera `thresholdChars`, los mensajes antiguos se resumen con una IA y se conservan los `keepRecent` últimos.
+  // `agent` y `model` eligen quién resume (vacío: la primera IA disponible de la conversación, con su modelo).
+  compaction: { enabled: true, thresholdChars: 60_000, keepRecent: 12, agent: '', model: '', timeoutMinutes: 5 },
+  // Reglas del proyecto (AGENTS.md o CLAUDE.md) que se añaden al contexto de las IAs; se recortan a este tamaño.
+  projectRules: { enabled: true, maxChars: 20_000 },
   customAgents: {},
   agents: {
     claude: {

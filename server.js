@@ -376,6 +376,8 @@ const routes = [
   ],
 ];
 
+routes.unshift(...(await import('./src/routes-commands.js')).default({ chats, send, readBody })); // modos, comandos, reglas y compactación
+
 function serveStatic(req, res, url) {
   const rel = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname).replace(/^\/+/, '');
   const file = path.resolve(PUBLIC, rel);
