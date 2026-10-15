@@ -10,6 +10,9 @@ export const DEFAULT_CONFIG = {
   autonomy: 'edits',
   taskTimeoutMinutes: 30,
   maxFixRounds: 1,
+  // Dictado: "browser" usa el reconocimiento del navegador; "local" usa Whisper en este PC, sin internet.
+  speech: { engine: 'browser', model: 'base', language: 'es' },
+  notifications: { enabled: true, sound: true },
   agents: {
     claude: {
       enabled: true,

@@ -1365,28 +1365,205 @@ $('#rvSync').addEventListener('click', syncFromProject);
 const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
 const dictationLang = () => (navigator.language?.toLowerCase().startsWith('es') ? navigator.language : 'es-ES');
 let activeDictation = null;
+state.speech = null; // estado del dictado local (motor, modelos)
 
-/** Dictado con el reconocimiento de voz del navegador: escribe en el textarea mientras hablas. */
+async function loadSpeech() {
+  try {
+    state.speech = await api('GET', '/api/speech');
+  } catch {
+    state.speech = null;
+  }
+  renderSpeechSettings();
+}
+
+/** ¿Se usa el dictado local (Whisper en este PC)? */
+function localDictationReady() {
+  const s = state.speech;
+  return Boolean(s && s.engine === 'local' && s.available && s.models.find((m) => m.id === s.model)?.installed);
+}
+
+function micDenied() {
+  alert('AITeam no tiene permiso para usar el micrófono. Permítelo en el icono del candado de la barra de direcciones (o en Configuración de Windows → Privacidad → Micrófono).');
+}
+
+// Procesador de audio: entrega los fragmentos de audio crudo del micrófono al hilo principal.
+const CAPTURE_WORKLET = URL.createObjectURL(
+  new Blob(
+    [
+      `class Capture extends AudioWorkletProcessor {
+        process(inputs) { const ch = inputs[0]?.[0]; if (ch) this.port.postMessage(ch.slice(0)); return true; }
+      }
+      registerProcessor('aiteam-capture', Capture);`,
+    ],
+    { type: 'text/javascript' },
+  ),
+);
+
+/** Convierte audio a 16 kHz (media por bloques; suficiente para voz). */
+function downsample(samples, fromRate, toRate = 16000) {
+  if (fromRate === toRate) return samples;
+  const ratio = fromRate / toRate;
+  const out = new Float32Array(Math.floor(samples.length / ratio));
+  for (let i = 0; i < out.length; i++) {
+    const start = Math.floor(i * ratio);
+    const end = Math.min(samples.length, Math.floor((i + 1) * ratio));
+    let sum = 0;
+    for (let j = start; j < end; j++) sum += samples[j];
+    out[i] = sum / Math.max(1, end - start);
+  }
+  return out;
+}
+
+/**
+ * Dictado local: graba, detecta las pausas al hablar y manda cada frase a transcribir a este PC (Whisper).
+ * El texto aparece frase a frase, en orden.
+ */
+async function startLocalDictation(textarea, onState) {
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  } catch {
+    micDenied();
+    return null;
+  }
+  const ctx = new AudioContext();
+  await ctx.audioWorklet.addModule(CAPTURE_WORKLET);
+  const source = ctx.createMediaStreamSource(stream);
+  const node = new AudioWorkletNode(ctx, 'aiteam-capture');
+  source.connect(node);
+
+  const rate = ctx.sampleRate;
+  const frame = Math.round(rate * 0.03); // ventanas de 30 ms para medir el volumen
+  let pending = new Float32Array(0);
+  let segment = [];
+  let segmentLen = 0;
+  let speaking = false;
+  let silentFrames = 0;
+  let noiseFloor = 0.004;
+  const MAX_SEGMENT = rate * 24; // frases de hasta ~24 s
+  const SILENCE_TO_CUT = Math.round(0.75 / 0.03); // 0,75 s de silencio corta la frase
+  const preRoll = []; // un poco de audio previo para no comerse el inicio de la palabra
+  let queue = Promise.resolve();
+  let inFlight = 0;
+  let base = textarea.value && !/\s$/.test(textarea.value) ? `${textarea.value} ` : textarea.value;
+  let committed = '';
+
+  const flush = () => {
+    if (!segmentLen) return;
+    const audio = new Float32Array(segmentLen);
+    let o = 0;
+    for (const s of segment) {
+      audio.set(s, o);
+      o += s.length;
+    }
+    segment = [];
+    segmentLen = 0;
+    if (audio.length < rate * 0.35) return; // demasiado corto: ruido
+    const pcm16k = downsample(audio, rate);
+    inFlight++;
+    onState('transcribing');
+    queue = queue.then(async () => {
+      try {
+        const res = await fetch('/api/speech/transcribe', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: pcm16k.buffer });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? 'Error al transcribir');
+        if (data.text) {
+          committed += (committed ? ' ' : '') + data.text;
+          textarea.value = base + committed;
+          textarea.dispatchEvent(new Event('input'));
+          textarea.scrollTop = textarea.scrollHeight;
+        }
+      } catch (err) {
+        alert(`Dictado local: ${err.message}`);
+      } finally {
+        inFlight--;
+        onState(inFlight ? 'transcribing' : 'listening');
+      }
+    });
+  };
+
+  node.port.onmessage = (e) => {
+    const merged = new Float32Array(pending.length + e.data.length);
+    merged.set(pending);
+    merged.set(e.data, pending.length);
+    let pos = 0;
+    while (merged.length - pos >= frame) {
+      const chunk = merged.subarray(pos, pos + frame);
+      pos += frame;
+      let sum = 0;
+      for (let i = 0; i < chunk.length; i++) sum += chunk[i] * chunk[i];
+      const rms = Math.sqrt(sum / chunk.length);
+      const voiced = rms > Math.max(0.01, noiseFloor * 3);
+      if (!speaking) {
+        noiseFloor = noiseFloor * 0.95 + rms * 0.05; // se adapta al ruido de la habitación
+        preRoll.push(chunk.slice(0));
+        if (preRoll.length > 10) preRoll.shift();
+        if (voiced) {
+          speaking = true;
+          silentFrames = 0;
+          for (const p of preRoll) {
+            segment.push(p);
+            segmentLen += p.length;
+          }
+          preRoll.length = 0;
+        }
+        continue;
+      }
+      segment.push(chunk.slice(0));
+      segmentLen += chunk.length;
+      silentFrames = voiced ? 0 : silentFrames + 1;
+      if (silentFrames >= SILENCE_TO_CUT || segmentLen >= MAX_SEGMENT) {
+        speaking = false;
+        flush();
+      }
+    }
+    pending = merged.slice(pos);
+  };
+
+  onState('listening');
+  return {
+    async stop() {
+      flush();
+      node.port.onmessage = null;
+      source.disconnect();
+      stream.getTracks().forEach((t) => t.stop());
+      await ctx.close();
+      await queue;
+    },
+  };
+}
+
+/** Dictado en un cuadro de texto: local (Whisper, sin internet) o con el reconocimiento del navegador. */
 function attachDictation(textarea, btn) {
   const ctl = { stop() {} };
-  if (!SpeechRec) {
+  if (!SpeechRec && !navigator.mediaDevices?.getUserMedia) {
     btn.disabled = true;
     btn.title = 'Este navegador no admite dictado por voz (usa Edge o Chrome).';
     return ctl;
   }
-  let rec = null;
+  let rec = null; // reconocimiento del navegador
+  let local = null; // dictado local
+  const setBtn = (mode) => {
+    btn.classList.toggle('rec', mode === 'listening' || mode === 'transcribing');
+    btn.classList.toggle('busy', mode === 'transcribing');
+    btn.innerHTML = icon(mode === 'idle' ? 'mic' : 'stop', 18);
+    btn.title = mode === 'transcribing' ? 'Transcribiendo en este PC…' : mode === 'listening' ? 'Escuchando… (pulsa para terminar)' : 'Dictar por voz (Ctrl+M)';
+  };
   const setIdle = () => {
     rec = null;
-    btn.classList.remove('rec');
-    btn.innerHTML = icon('mic', 18);
+    local = null;
+    setBtn('idle');
     if (activeDictation === ctl) activeDictation = null;
   };
-  ctl.stop = () => rec?.stop();
-  ctl.toggle = () => {
-    if (rec) return rec.stop();
-    activeDictation?.stop();
+  ctl.stop = () => {
+    rec?.stop();
+    if (local) local.stop().finally(setIdle);
+  };
+
+  const startBrowser = () => {
+    if (!SpeechRec) return alert('Este navegador no tiene dictado propio. Activa el dictado local en Ajustes → Dictado por voz.');
     rec = new SpeechRec();
-    rec.lang = dictationLang();
+    rec.lang = state.speech?.language && state.speech.language !== 'auto' ? state.speech.language : dictationLang();
     rec.interimResults = true;
     rec.continuous = true;
     const base = textarea.value && !/\s$/.test(textarea.value) ? `${textarea.value} ` : textarea.value;
@@ -1399,23 +1576,138 @@ function attachDictation(textarea, btn) {
       textarea.scrollTop = textarea.scrollHeight;
     };
     rec.onerror = (e) => {
-      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-        alert('AITeam no tiene permiso para usar el micrófono. Permítelo en el icono del candado de la barra de direcciones (o en Configuración de Windows → Privacidad → Micrófono).');
-      } else if (!['no-speech', 'aborted'].includes(e.error)) {
-        alert(`El dictado se detuvo: ${e.error}`);
-      }
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') micDenied();
+      else if (!['no-speech', 'aborted'].includes(e.error)) alert(`El dictado se detuvo: ${e.error}`);
     };
     rec.onend = setIdle;
     rec.start();
+    setBtn('listening');
+  };
+
+  ctl.toggle = async () => {
+    if (rec) return rec.stop();
+    if (local) {
+      const l = local;
+      local = null;
+      setBtn('transcribing');
+      await l.stop();
+      return setIdle();
+    }
+    activeDictation?.stop();
     activeDictation = ctl;
-    btn.classList.add('rec');
-    btn.innerHTML = icon('stop', 18);
     textarea.focus();
+    if (localDictationReady()) {
+      local = await startLocalDictation(textarea, (mode) => local && setBtn(mode));
+      if (!local) setIdle();
+    } else {
+      startBrowser();
+    }
   };
   btn.addEventListener('click', ctl.toggle);
   textarea._dictation = ctl;
   return ctl;
 }
+
+// ---- Ajustes del dictado
+
+function fmtMB(bytes) {
+  return `${Math.round(bytes / 1048576)} MB`;
+}
+
+function renderSpeechSettings() {
+  const box = document.getElementById('speechSettings');
+  if (!box) return;
+  const s = state.speech;
+  if (!s) {
+    box.innerHTML = '<p class="muted small-text">No se pudo consultar el dictado.</p>';
+    return;
+  }
+  box.innerHTML = `
+    <div class="seg speech-engine">
+      <button type="button" data-engine="local" class="${s.engine === 'local' ? 'on' : ''}">${icon('lock')} Local (sin internet)</button>
+      <button type="button" data-engine="browser" class="${s.engine !== 'local' ? 'on' : ''}">${icon('mic')} Navegador (Edge)</button>
+    </div>
+    <p class="muted small-text">${
+      s.engine === 'local'
+        ? 'Whisper transcribe en este PC: privado, gratis y sin conexión. El texto aparece frase a frase.'
+        : 'Usa el servicio de voz de Edge (envía el audio a Microsoft). Muestra el texto mientras hablas.'
+    }</p>
+    ${s.available ? '' : `<p class="error small-text">${esc(s.error ?? 'Motor de voz no disponible.')}</p>`}
+    <div class="speech-models">${s.models
+      .map((m) => {
+        const d = m.download;
+        const pct = d?.total ? Math.round((d.received / d.total) * 100) : 0;
+        const action = m.installed
+          ? `<label class="check"><input type="radio" name="speechModel" value="${m.id}" ${s.model === m.id ? 'checked' : ''}/> Usar</label>
+             <button type="button" class="small ghost" data-del-model="${m.id}" title="Borrar el modelo">${icon('close', 14)}</button>`
+          : d && !d.error
+            ? `<span class="muted small-text">${d.phase === 'descomprimiendo' ? 'Descomprimiendo…' : `${pct}% · ${fmtMB(d.received)}`}</span>`
+            : `<button type="button" class="small" data-get-model="${m.id}">Descargar (${m.size})</button>`;
+        return `<div class="speech-model">
+          <div><b>${esc(m.label)}</b> <span class="muted small-text">· ${esc(m.note)}</span>
+            ${d && !d.error && !m.installed ? `<div class="m-bar"><i class="ok" style="width:${pct}%"></i></div>` : ''}
+            ${d?.error ? `<div class="error small-text">${esc(d.error)}</div>` : ''}</div>
+          <div class="actions">${action}</div>
+        </div>`;
+      })
+      .join('')}</div>
+    <label class="speech-lang"><span class="muted small-text">Idioma</span>
+      <select id="speechLang">
+        ${[['es', 'Español'], ['en', 'Inglés'], ['auto', 'Detectar automáticamente']].map(([v, l]) => `<option value="${v}" ${s.language === v ? 'selected' : ''}>${l}</option>`).join('')}
+      </select>
+    </label>`;
+}
+
+async function saveSpeech(patch) {
+  await api('PUT', '/api/config', { speech: { engine: state.speech.engine, model: state.speech.model, language: state.speech.language, ...patch } });
+  await loadSpeech();
+}
+
+document.addEventListener('click', async (e) => {
+  const box = e.target.closest('#speechSettings');
+  if (!box) return;
+  const engineBtn = e.target.closest('[data-engine]');
+  if (engineBtn) {
+    if (engineBtn.dataset.engine === 'local' && !state.speech.models.some((m) => m.installed)) {
+      alert('Primero descarga un modelo (recomendado: Whisper base).');
+      return;
+    }
+    return saveSpeech({ engine: engineBtn.dataset.engine });
+  }
+  const get = e.target.closest('[data-get-model]');
+  if (get) {
+    get.disabled = true;
+    try {
+      state.speech = await api('POST', `/api/speech/models/${get.dataset.getModel}/download`);
+      renderSpeechSettings();
+    } catch (err) {
+      alert(err.message);
+    }
+    return;
+  }
+  const del = e.target.closest('[data-del-model]');
+  if (del && confirm('¿Borrar este modelo de voz? Podrás descargarlo de nuevo.')) {
+    state.speech = await api('DELETE', `/api/speech/models/${del.dataset.delModel}`);
+    if (state.speech.engine === 'local' && !state.speech.models.find((m) => m.id === state.speech.model)?.installed) await saveSpeech({ engine: 'browser' });
+    renderSpeechSettings();
+  }
+});
+document.addEventListener('change', (e) => {
+  if (e.target.name === 'speechModel') saveSpeech({ model: e.target.value });
+  if (e.target.id === 'speechLang') saveSpeech({ language: e.target.value });
+});
+
+events.addEventListener('speech', async (e) => {
+  const prev = state.speech;
+  state.speech = { ...(prev ?? {}), ...JSON.parse(e.data) };
+  // Al terminar la primera descarga, se activa el dictado local automáticamente.
+  const justInstalled = state.speech.models.find((m) => m.installed && !prev?.models?.find((p) => p.id === m.id)?.installed);
+  if (justInstalled && state.speech.engine !== 'local') {
+    await saveSpeech({ engine: 'local', model: justInstalled.id });
+    return;
+  }
+  renderSpeechSettings();
+});
 
 // Ctrl+M dicta en el cuadro de texto que tenga el foco (o en el del chat).
 document.addEventListener('keydown', (e) => {
@@ -1477,6 +1769,123 @@ $('#accentRow').addEventListener('click', (e) => {
   if (id) setLook('accent', id);
 });
 $('#settingsBtn').addEventListener('click', renderAppearance);
+$('#settingsBtn').addEventListener('click', loadSpeech);
+
+// ------------------------------------------------------------ notificaciones
+
+state.notify = { enabled: true, sound: true };
+const prevChatWorking = new Map();
+const prevRunStatus = new Map();
+
+/** Sonido suave de dos tonos (sin archivos de audio). */
+function chime() {
+  try {
+    const ctx = new AudioContext();
+    const t = ctx.currentTime;
+    for (const [i, freq] of [[0, 784], [1, 1046]]) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, t + i * 0.14);
+      gain.gain.exponentialRampToValueAtTime(0.18, t + i * 0.14 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.14 + 0.35);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t + i * 0.14);
+      osc.stop(t + i * 0.14 + 0.4);
+    }
+    setTimeout(() => ctx.close(), 1200);
+  } catch {
+    /* sin audio */
+  }
+}
+
+/** Avisa solo si estás en otra ventana o en otra conversación (no hace falta avisar de lo que ya estás viendo). */
+function notifyUser(title, body, open, force = false) {
+  if (!state.notify.enabled) return;
+  const viewing = document.hasFocus() && !document.hidden;
+  if (viewing && !force) return;
+  if (state.notify.sound) chime();
+  if ('Notification' in window && Notification.permission === 'granted') {
+    const n = new Notification(title, { body, icon: 'icon-192.png', tag: title });
+    n.onclick = () => {
+      window.focus();
+      open?.();
+      n.close();
+    };
+  }
+}
+
+const firstLine = (text, n = 140) => {
+  const one = String(text ?? '').replace(/\s+/g, ' ').trim();
+  return one.length > n ? `${one.slice(0, n)}…` : one;
+};
+
+function watchChatForNotice(chat) {
+  const was = prevChatWorking.get(chat.id);
+  prevChatWorking.set(chat.id, Boolean(chat.working));
+  if (!was || chat.working) return;
+  const last = [...chat.messages].reverse().find((m) => m.kind === 'message' || m.kind === 'error');
+  if (!last) return;
+  const elsewhere = state.view !== 'chat' || state.chat?.id !== chat.id;
+  const open = () => openChat(chat.id);
+  if (last.kind === 'error') notifyUser(`AITeam · ${firstLine(chat.title, 60)}`, firstLine(last.text), open, elsewhere);
+  else if (agentInfo(last.from)?.name && last.from !== 'user') notifyUser(`${agentInfo(last.from).name} respondió`, firstLine(last.text), open, elsewhere);
+}
+
+function watchRunForNotice(run) {
+  const was = prevRunStatus.get(run.id);
+  prevRunStatus.set(run.id, run.status);
+  if (!was || was === run.status) return;
+  const elsewhere = state.view !== 'run' || state.current?.id !== run.id;
+  const open = () => openRun(run.id);
+  const goal = firstLine(run.goal, 80);
+  if (run.status === 'awaiting_approval') notifyUser('El equipo propone un reparto', `${goal} — revísalo y apruébalo.`, open, elsewhere);
+  else if (run.status === 'done') notifyUser('Tarea de equipo terminada', goal, open, elsewhere);
+  else if (run.status === 'failed') notifyUser('La tarea de equipo falló', goal, open, elsewhere);
+}
+
+events.addEventListener('chat', (e) => watchChatForNotice(JSON.parse(e.data)));
+events.addEventListener('run', (e) => watchRunForNotice(JSON.parse(e.data)));
+
+function renderNotifySettings() {
+  $('#notifEnabled').checked = state.notify.enabled;
+  $('#notifSound').checked = state.notify.sound;
+  const perm = 'Notification' in window ? Notification.permission : 'unsupported';
+  $('#notifHint').textContent =
+    perm === 'granted'
+      ? 'Con la ventana cerrada, AITeam te avisa igualmente con una notificación de Windows.'
+      : perm === 'denied'
+        ? 'Has bloqueado las notificaciones de esta ventana: actívalas desde el candado de la barra de direcciones. Con la ventana cerrada seguirás recibiendo las de Windows.'
+        : 'Al activar o probar, la ventana te pedirá permiso para mostrar notificaciones.';
+}
+
+async function saveNotify(patch) {
+  state.notify = { ...state.notify, ...patch };
+  await api('PUT', '/api/config', { notifications: state.notify });
+  renderNotifySettings();
+}
+
+$('#notifEnabled').addEventListener('change', async (e) => {
+  if (e.target.checked && 'Notification' in window && Notification.permission === 'default') await Notification.requestPermission();
+  saveNotify({ enabled: e.target.checked });
+});
+$('#notifSound').addEventListener('change', (e) => saveNotify({ sound: e.target.checked }));
+$('#notifTest').addEventListener('click', async () => {
+  if ('Notification' in window && Notification.permission === 'default') await Notification.requestPermission();
+  renderNotifySettings();
+  notifyUser('AITeam', 'Así te avisaré cuando el equipo termine o necesite algo.', null, true);
+});
+$('#settingsBtn').addEventListener('click', renderNotifySettings);
+
+// La primera vez que envías algo, se pide permiso para notificar (necesita un gesto tuyo).
+document.addEventListener(
+  'submit',
+  () => {
+    if (state.notify.enabled && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+  },
+  { once: true, capture: true },
+);
 
 // ------------------------------------------------------------ reiniciar
 
@@ -1540,8 +1949,15 @@ $('#shutdownBtn').addEventListener('click', async () => {
 // ------------------------------------------------------------ arranque
 
 await loadAgents();
-state.defaultAutonomy = (await api('GET', '/api/config')).autonomy;
-await Promise.all([loadRuns(), loadChats(), loadProjects(), loadUsage()]);
+{
+  const cfg = await api('GET', '/api/config');
+  state.defaultAutonomy = cfg.autonomy;
+  state.notify = { enabled: cfg.notifications?.enabled !== false, sound: cfg.notifications?.sound !== false };
+}
+await Promise.all([loadRuns(), loadChats(), loadProjects(), loadUsage(), loadSpeech()]);
+// Estado inicial para detectar cambios (y no avisar de lo que ya había pasado).
+for (const c of state.chats) prevChatWorking.set(c.id, Boolean(c.working));
+for (const r of state.runs) prevRunStatus.set(r.id, r.status);
 const lastChat = localStorage.getItem('aiteam.chat');
 if (lastChat && state.chats.some((c) => c.id === lastChat)) openChat(lastChat);
 else if (state.chats.length) openChat(state.chats[0].id);

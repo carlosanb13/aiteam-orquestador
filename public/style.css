@@ -507,3 +507,14 @@ button .i { margin-right: 2px; }
 .restart-overlay > div { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 26px 34px; }
 .restart-overlay .i { animation: spin 1.2s linear infinite; color: var(--accent); }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- ajustes del dictado ---------- */
+.speech-engine { margin-bottom: 6px; }
+.speech-models { display: grid; gap: 8px; margin: 10px 0; }
+.speech-model { display: flex; justify-content: space-between; align-items: center; gap: 12px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+.speech-model .m-bar { margin-top: 6px; width: 220px; }
+.speech-model .actions { align-items: center; }
+.speech-lang { display: flex !important; align-items: center; gap: 10px; }
+.speech-lang select { width: auto; }
+.mic-btn.busy { animation: none; background: var(--warn); }
+.notif-row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }

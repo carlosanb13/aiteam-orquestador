@@ -22,7 +22,12 @@ Un chat único donde hablas con todas a la vez:
 - **Aplicar al proyecto** fusiona el trabajo en la rama actual de tu proyecto. No toca nada si tienes cambios sin guardar; si hay conflictos, deshace la fusión y una IA puede resolverlos (**Traer cambios del proyecto**).
 
 ### 🎙️ Dictado por voz
-Botón de micrófono (o **Ctrl+M**) en el chat, en el formulario de tareas y al pedir cambios. Usa el reconocimiento de voz del navegador (Edge/Chrome), sin coste.
+Botón de micrófono (o **Ctrl+M**) en el chat, en el formulario de tareas y al pedir cambios. Dos motores (Ajustes → Dictado por voz):
+- **Local, sin internet**: Whisper ejecutado en tu PC con [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (el mismo motor que usa Orca). Privado y gratis; detecta las pausas y escribe frase a frase. Modelos tiny (116 MB), base (208 MB, recomendado) o small (640 MB), que se descargan una sola vez. Corrige automáticamente los nombres del equipo (Claude, Codex, Antigravity, AITeam).
+- **Navegador**: el reconocimiento de voz de Edge (en la nube de Microsoft).
+
+### 🔔 Notificaciones
+Te avisa cuando una IA termina de responder, el equipo propone un reparto o algo falla, con un sonido suave. Con la ventana abierta usa las notificaciones de la ventana; con la ventana cerrada, notificaciones de Windows (el servidor sigue en segundo plano).
 
 ### 🎨 Apariencia
 Temas **OLED** (negro puro), **Oscuro**, **Medianoche** y **Claro**, con seis colores de acento (Ajustes → Apariencia). Emblemas propios para cada IA (no son los logos oficiales, que son marcas registradas).

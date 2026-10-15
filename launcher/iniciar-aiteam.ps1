@@ -36,6 +36,11 @@ if (-not (Test-AITeam)) {
         exit 1
     }
     New-Item -ItemType Directory -Force $dataDir | Out-Null
+    # Dependencias (motor de voz local) si aún no están instaladas, p. ej. en una copia recién descargada.
+    if (-not (Test-Path (Join-Path $root 'node_modules\sherpa-onnx-node'))) {
+        $npm = (Get-Command npm.cmd -ErrorAction SilentlyContinue).Source
+        if ($npm) { Start-Process -FilePath $npm -ArgumentList 'install', '--omit=dev', '--no-audit', '--no-fund' -WorkingDirectory $root -WindowStyle Hidden -Wait }
+    }
     # Servidor oculto; su salida queda en data\servidor.log.
     # cmd /c quita la primera y la última comilla: por eso la orden completa va envuelta en un par extra.
     $cmd = "`"`"$node`" server.js >> `"$logFile`" 2>&1`""

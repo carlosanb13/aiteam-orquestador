@@ -10,5 +10,8 @@
   "scripts": {
     "start": "node server.js",
     "mock": "node server.js --mock"
+  },
+  "dependencies": {
+    "sherpa-onnx-node": "1.13.8"
   }
 }

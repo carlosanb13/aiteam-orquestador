@@ -10,6 +10,8 @@ import { AGENTS, MOCK, checkAgent, invokeAgent } from './src/agents.js';
 import { getUsage, onUsageChange } from './src/usage.js';
 import * as Projects from './src/projects.js';
 import * as Review from './src/review.js';
+import * as Speech from './src/speech.js';
+import { watchForNotifications } from './src/notify.js';
 import { loadConfig, saveConfig } from './src/config.js';
 
 const PORT = Number(process.env.PORT) || 4317;
@@ -73,6 +75,8 @@ chats.on('chat', (chat) => broadcast('chat', chat));
 chats.on('activity', (a) => broadcast('chat-activity', a));
 chats.on('removed', (r) => broadcast('chat-removed', r));
 onUsageChange(() => broadcast('usage', getUsage()));
+Speech.onSpeechChange((status) => broadcast('speech', status));
+watchForNotifications({ chats, orchestrator, agents: AGENTS, hasViewers: () => clients.size > 0 });
 
 function reviewTarget(kind, id, { mustBeIdle = false } = {}) {
   if (kind === 'chats') {
@@ -113,6 +117,18 @@ function send(res, status, body) {
   if (res.headersSent) return console.error('Respuesta ya enviada:', body?.error ?? body);
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(body));
+}
+
+/** Cuerpo binario (audio del dictado). */
+async function readRaw(req, limit = 40 * 1024 * 1024) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > limit) throw new Error('Audio demasiado largo.');
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
 }
 
 async function readBody(req) {
@@ -220,6 +236,22 @@ const routes = [
     },
   ],
   ['GET', /^\/api\/app$/, (req, res) => send(res, 200, { root: APP_ROOT, pid: process.pid, startedAt: STARTED_AT })],
+  // ---- Dictado local (Whisper)
+  ['GET', /^\/api\/speech$/, (req, res) => send(res, 200, Speech.speechStatus())],
+  ['POST', /^\/api\/speech\/models\/(\w+)\/download$/, async (req, res, m) => send(res, 200, await Speech.downloadModel(m[1]))],
+  ['DELETE', /^\/api\/speech\/models\/(\w+)$/, (req, res, m) => send(res, 200, Speech.deleteModel(m[1]))],
+  [
+    'POST',
+    /^\/api\/speech\/transcribe$/,
+    async (req, res) => {
+      // Audio mono Float32 a 16 kHz, en crudo.
+      const buf = await readRaw(req);
+      const samples = new Float32Array(buf.buffer, buf.byteOffset, Math.floor(buf.length / 4));
+      const started = Date.now();
+      const text = await Speech.transcribe(Float32Array.from(samples));
+      send(res, 200, { text, ms: Date.now() - started });
+    },
+  ],
   ['GET', /^\/api\/usage$/, (req, res) => send(res, 200, getUsage())],
   [
     'POST',

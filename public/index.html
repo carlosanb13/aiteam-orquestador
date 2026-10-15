@@ -150,6 +150,19 @@
           <div class="muted small-text" style="margin:10px 0 6px">Color de acento</div>
           <div class="accent-row" id="accentRow"></div>
         </fieldset>
+        <fieldset>
+          <legend>Notificaciones</legend>
+          <div class="notif-row">
+            <label class="check"><input type="checkbox" id="notifEnabled" /> Avisarme cuando una IA termine, el equipo necesite mi aprobación o algo falle</label>
+            <label class="check"><input type="checkbox" id="notifSound" /> Con sonido</label>
+            <button type="button" class="small" id="notifTest">Probar</button>
+          </div>
+          <p class="muted small-text" id="notifHint"></p>
+        </fieldset>
+        <fieldset>
+          <legend>Dictado por voz</legend>
+          <div id="speechSettings"></div>
+        </fieldset>
         <label>
           <span>Autonomía de las IAs</span>
           <select name="autonomy">
