@@ -972,9 +972,12 @@ $('#selfDevBtn').addEventListener('click', async (e) => {
   const btn = e.currentTarget;
   btn.disabled = true;
   try {
-    const { root } = await api('GET', '/api/app');
-    const existing = state.chats.find((c) => normPath(c.repoPath) === normPath(root));
-    if (existing) return openChat(existing.id);
+    const { root, head } = await api('GET', '/api/app');
+    const candidates = state.chats.filter((c) => normPath(c.repoPath) === normPath(root));
+    for (const item of candidates) {
+      const chat = await api('GET', `/api/chats/${item.id}`);
+      if (chat.baseCommit === head) return openChat(chat.id);
+    }
     if (!usableAgents().length) throw new Error('Ninguna IA está disponible. Revisa el equipo y prueba su conexión.');
     await api('POST', '/api/projects', { path: root });
     await loadProjects();

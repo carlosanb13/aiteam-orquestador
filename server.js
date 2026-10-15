@@ -240,7 +240,10 @@ const routes = [
       send(res, 200, { ok: true });
     },
   ],
-  ['GET', /^\/api\/app$/, (req, res) => send(res, 200, { root: APP_ROOT, pid: process.pid, startedAt: STARTED_AT })],
+  ['GET', /^\/api\/app$/, async (req, res) => {
+    const head = await G.git(APP_ROOT, ['rev-parse', 'HEAD'], { allowFail: true });
+    send(res, 200, { root: APP_ROOT, pid: process.pid, startedAt: STARTED_AT, head: head.ok ? head.stdout.trim() : null });
+  }],
   // ---- Dictado local (Whisper)
   ['GET', /^\/api\/speech$/, (req, res) => send(res, 200, Speech.speechStatus())],
   ['POST', /^\/api\/speech\/models\/(\w+)\/download$/, async (req, res, m) => send(res, 200, await Speech.downloadModel(m[1]))],
