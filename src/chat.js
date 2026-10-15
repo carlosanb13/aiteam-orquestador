@@ -6,6 +6,7 @@ import * as G from './git.js';
 import { AGENTS, invokeAgent } from './agents.js';
 import { DATA_DIR, loadConfig } from './config.js';
 import { killTree } from './runner.js';
+import { canDo, describeRequires, detectRequires } from './capabilities.js';
 
 const CHATS_DIR = path.join(DATA_DIR, 'chats');
 const MAX_HOPS = 4;
@@ -313,9 +314,16 @@ export class ChatManager extends EventEmitter {
 
   async turn(chat, { agent, request, hop, relayedFrom }, q) {
     if (this.isExhausted(chat, agent)) {
-      const alt = this.available(chat).find((a) => a !== agent);
+      const requires = detectRequires(request.text);
+      const alt = this.available(chat).find((a) => a !== agent && canDo(a, requires));
       if (!alt) {
-        this.addMessage(chat, { from: 'system', kind: 'error', text: `${AGENTS[agent].name} no tiene cuota y no queda nadie más disponible.` });
+        this.addMessage(chat, {
+          from: 'system',
+          kind: 'error',
+          text: requires.length
+            ? `${AGENTS[agent].name} no está disponible y ninguna otra IA de la conversación puede hacer esto (requiere ${describeRequires(requires)}).`
+            : `${AGENTS[agent].name} no está disponible y no queda nadie más.`,
+        });
         return;
       }
       relayedFrom = agent;
@@ -372,7 +380,15 @@ export class ChatManager extends EventEmitter {
         meta: { activity },
       });
       // Relevo: si se quedó sin cuota, otra IA atiende la misma petición.
-      const alt = (quota || auth) && !relayedFrom ? this.available(chat).find((a) => a !== agent) : null;
+      const requires = detectRequires(request.text);
+      const alt = (quota || auth) && !relayedFrom ? this.available(chat).find((a) => a !== agent && canDo(a, requires)) : null;
+      if ((quota || auth) && !relayedFrom && !alt && requires.length) {
+        this.addMessage(chat, {
+          from: 'system',
+          kind: 'notice',
+          text: `Ninguna otra IA de la conversación puede encargarse (requiere ${describeRequires(requires)}). Vuelve a pedírselo a ${AGENTS[agent].name} cuando esté disponible.`,
+        });
+      }
       if (alt) {
         this.addMessage(chat, { from: 'system', kind: 'notice', text: `${AGENTS[alt].name} se encarga en su lugar.` });
         q.items.unshift({ agent: alt, request, hop, relayedFrom: agent });

@@ -207,7 +207,11 @@ async function mockInvoke(agentId, { prompt, cwd, mode, onEvent }) {
   const kind = prompt.match(/\[\[KIND:(\w+)\]\]/)?.[1];
   // AITEAM_MOCK_FAIL=codex simula que esa IA se queda sin cuota al trabajar (para probar el relevo).
   if (kind === 'task' && process.env.AITEAM_MOCK_FAIL === agentId) {
-    return { ok: false, error: "You've hit your usage limit (simulación)." };
+    return {
+      ok: false,
+      // AITEAM_MOCK_FAIL_KIND=network simula un corte de red en lugar de falta de cuota.
+      error: process.env.AITEAM_MOCK_FAIL_KIND === 'network' ? 'read tcp 192.168.1.61:55922: wsarecv: A connection attempt failed (simulación).' : "You've hit your usage limit (simulación).",
+    };
   }
   let json;
   if (kind === 'chat') {
@@ -226,6 +230,7 @@ async function mockInvoke(agentId, { prompt, cwd, mode, onEvent }) {
         { id: 't2', title: 'Implementar la lógica principal', description: 'Escribir la lógica.', kind: 'backend', dependsOn: ['t1'] },
         { id: 't3', title: 'Escribir la documentación', description: 'Documentar el uso.', kind: 'documentación', dependsOn: [] },
         { id: 't4', title: 'Añadir tests', description: 'Cubrir los casos principales.', kind: 'tests', dependsOn: ['t2'] },
+        { id: 't5', title: 'Generar el logo como imagen PNG', description: 'Usar el generador de imágenes.', kind: 'diseño', dependsOn: [], requires: ['images'] },
       ],
     };
   } else if (kind === 'bid') {

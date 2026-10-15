@@ -46,6 +46,9 @@ const STEPS = [
   ['done', 'Listo'],
 ];
 
+// Capacidades especiales de las IAs (ver src/capabilities.js).
+const CAP_LABELS = { images: 'imágenes', browser: 'navegador' };
+const CAP_TITLES = { images: 'Generar imágenes', browser: 'Usar el navegador' };
 const agentInfo = (id) => state.agents.find((a) => a.id === id) ?? { id, name: id, color: '#888' };
 const badge = ([label, cls]) => `<span class="badge ${cls}">${esc(label)}</span>`;
 const fmtTime = (iso) => new Date(iso).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -241,7 +244,8 @@ function renderRun() {
       return `<tr>
         <td class="mono">${esc(t.id)}</td>
         <td>
-          <div class="title">${esc(t.title)} <span class="badge">${esc(t.kind)}</span></div>
+          <div class="title">${esc(t.title)} <span class="badge">${esc(t.kind)}</span>${(t.requires ?? []).map((r) => `<span class="badge req" title="Solo pueden hacerla las IAs con esta capacidad">${icon(r === 'images' ? 'palette' : 'folder', 11)} requiere ${esc(CAP_LABELS[r] ?? r)}</span>`).join('')}</div>
+          ${t.warning ? `<div class="desc warn-text">${icon('alert', 12)} ${esc(t.warning)}</div>` : ''}
           <details class="desc"><summary>Detalles</summary><div class="desc">${esc(t.description)}</div></details>
           ${t.dependsOn.length ? `<div class="desc">Depende de: ${t.dependsOn.map(esc).join(', ')}</div>` : ''}
           ${t.reassignedFrom?.length ? `<div class="desc">${icon('relay', 12)} Reasignada (antes: ${t.reassignedFrom.map((a) => esc(agentInfo(a).name)).join(', ')})</div>` : ''}
@@ -469,6 +473,7 @@ $('#settingsBtn').addEventListener('click', async () => {
         <label class="check"><input type="checkbox" data-k="enabled" ${c.enabled !== false ? 'checked' : ''} /> <b style="color:${a.color}">${esc(a.name)}</b> <span class="muted">${esc(a.vendor)}</span></label>
         <label><span>Modelo <em class="muted">(vacío = el predeterminado del CLI)</em></span><input data-k="model" value="${esc(c.model ?? '')}" /></label>
         <label><span>En qué destaca (lo leen las demás IAs al negociar)</span><textarea data-k="profile" rows="2">${esc(c.profile ?? '')}</textarea></label>
+        <div class="caps"><span class="muted small-text">Además de programar, puede:</span>${Object.entries(CAP_LABELS).map(([cap, label]) => `<label class="check"><input type="checkbox" data-cap="${cap}" ${(c.capabilities ?? []).includes(cap) ? 'checked' : ''} /> ${esc(CAP_TITLES[cap])}</label>`).join('')}</div>
       </div>`;
     })
     .join('');
@@ -484,6 +489,7 @@ $('#saveSettings').addEventListener('click', async (e) => {
       enabled: box.querySelector('[data-k=enabled]').checked,
       model: box.querySelector('[data-k=model]').value.trim(),
       profile: box.querySelector('[data-k=profile]').value.trim(),
+      capabilities: [...box.querySelectorAll('[data-cap]:checked')].map((x) => x.dataset.cap),
     };
   }
   await api('PUT', '/api/config', {

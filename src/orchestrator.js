@@ -5,12 +5,14 @@ import crypto from 'node:crypto';
 import * as G from './git.js';
 import * as P from './prompts.js';
 import { AGENTS, invokeAgent, isNetworkError } from './agents.js';
+import { CAPABILITIES, canDo, describeRequires, detectRequires, missingFor } from './capabilities.js';
 import { DATA_DIR, loadConfig } from './config.js';
 import { killTree, runShell } from './runner.js';
 
 const RUNS_DIR = path.join(DATA_DIR, 'runs');
 const ACTIVE = new Set(['planning', 'bidding', 'running', 'reviewing', 'integrating', 'attacking', 'testing']);
 const LOAD_PENALTY = 1.5;
+const CAPABLE_RETRY_DELAY_MS = 45_000; // espera antes de reintentar con la única IA capaz tras un error de red
 const MAX_ATTEMPTS_PER_TASK = 3;
 const QUOTA_ERROR = /usage limit|rate.?limit|quota|limit reached|resource.?exhausted|too many requests|\b429\b|credits/i;
 
@@ -35,6 +37,10 @@ function normalizeTasks(raw) {
       description: String(t.description ?? t.title ?? ''),
       kind: short(t.kind ?? 'general', 40),
       dependsOn: Array.isArray(t.dependsOn) ? t.dependsOn.map(String) : [],
+      // Capacidades imprescindibles; si el plan no las declaró, se deducen del texto.
+      requires: Array.isArray(t.requires)
+        ? [...new Set(t.requires.map(String).filter((r) => CAPABILITIES[r]))]
+        : detectRequires(`${t.title ?? ''} ${t.description ?? ''}`),
     });
   }
   const ids = new Set(tasks.map((t) => t.id));
@@ -326,7 +332,12 @@ export class Orchestrator extends EventEmitter {
       run.activeAgents.push(agent);
       for (const bid of res.json.bids) {
         const task = run.tasks.find((t) => t.id === String(bid.taskId));
-        if (task) task.bids[agent] = { score: Math.max(0, Math.min(10, Number(bid.score) || 0)), reason: short(bid.reason, 300) };
+        if (!task) continue;
+        // Quien no tiene la capacidad que pide la subtarea no puede quedársela, diga lo que diga su nota.
+        const missing = missingFor(agent, task.requires);
+        task.bids[agent] = missing.length
+          ? { score: 0, reason: `No puede: requiere ${describeRequires(missing)}.` }
+          : { score: Math.max(0, Math.min(10, Number(bid.score) || 0)), reason: short(bid.reason, 300) };
       }
       run.reviewScores[agent] = {
         score: Math.max(0, Math.min(10, Number(res.json.review?.score) || 0)),
@@ -340,7 +351,11 @@ export class Orchestrator extends EventEmitter {
     const load = Object.fromEntries(run.activeAgents.map((a) => [a, 0]));
     for (const task of run.tasks) {
       let best = null;
-      for (const a of run.activeAgents) {
+      const capable = run.activeAgents.filter((a) => canDo(a, task.requires));
+      if (task.requires.length && !capable.length) {
+        task.warning = `Ninguna IA del equipo tiene la capacidad necesaria (${describeRequires(task.requires)}); revisa las capacidades en Ajustes.`;
+      }
+      for (const a of capable.length ? capable : run.activeAgents) {
         const score = (task.bids[a]?.score ?? 0) - LOAD_PENALTY * load[a];
         if (!best || score > best.score || (score === best.score && load[a] < load[best.agent])) best = { agent: a, score };
       }
@@ -377,7 +392,7 @@ export class Orchestrator extends EventEmitter {
 
   /** Mejor IA disponible para una subtarea según las valoraciones, excluyendo las que ya fallaron en ella. */
   bestAlternative(run, task) {
-    const candidates = this.available(run).filter((a) => !task.failedBy.includes(a));
+    const candidates = this.available(run).filter((a) => !task.failedBy.includes(a) && canDo(a, task.requires));
     if (!candidates.length) return null;
     const load = (a) => run.tasks.filter((t) => t.assignee === a && (t.status === 'pending' || t.status === 'running')).length;
     return candidates.reduce((best, a) => {
@@ -400,7 +415,10 @@ export class Orchestrator extends EventEmitter {
 
   async execute(run) {
     this.setStatus(run, 'running', 'Las IAs están trabajando en paralelo');
-    for (const t of run.tasks) t.failedBy ??= [];
+    for (const t of run.tasks) {
+      t.failedBy ??= [];
+      t.requires ??= [];
+    }
     for (const agent of new Set(run.tasks.map((t) => t.assignee))) await this.ensureWorktree(run, agent);
     this.touch(run);
 
@@ -423,12 +441,15 @@ export class Orchestrator extends EventEmitter {
           this.touch(run);
         } else if (run.exhausted[t.assignee] && !this.reassign(run, t, 'se quedó sin cuota')) {
           t.status = 'failed';
-          t.error = 'No queda ninguna IA disponible para esta subtarea.';
+          t.error = t.requires.length
+            ? `Requiere ${describeRequires(t.requires)} y ninguna IA capaz está disponible.`
+            : 'No queda ninguna IA disponible para esta subtarea.';
           this.touch(run);
         }
       }
       for (const t of run.tasks) {
         if (t.status !== 'pending' || running.has(t.assignee)) continue;
+        if (t.notBefore && Date.parse(t.notBefore) > Date.now()) continue; // reintento programado
         if (!t.dependsOn.every((d) => run.tasks.find((x) => x.id === d).status === 'done')) continue;
         const agent = t.assignee;
         running.set(
@@ -436,7 +457,13 @@ export class Orchestrator extends EventEmitter {
           this.runTask(run, t).finally(() => running.delete(agent)),
         );
       }
-      if (!running.size) break;
+      if (!running.size) {
+        // Si solo quedan reintentos programados, se espera a que llegue su hora.
+        const waits = run.tasks.filter((t) => t.status === 'pending' && t.notBefore).map((t) => Date.parse(t.notBefore));
+        if (!waits.length) break;
+        await new Promise((r) => setTimeout(r, Math.max(500, Math.min(...waits) - Date.now())));
+        continue;
+      }
       await Promise.race(running.values());
     }
     this.checkCancelled(run);
@@ -463,6 +490,7 @@ export class Orchestrator extends EventEmitter {
     task.status = 'running';
     task.startedAt = new Date().toISOString();
     task.error = null;
+    task.notBefore = null;
     this.touch(run);
 
     let res;
@@ -482,9 +510,21 @@ export class Orchestrator extends EventEmitter {
       // Historial de intentos: la interfaz los muestra como "intento anterior" si la subtarea sigue con otra IA.
       task.attempts = [...(task.attempts ?? []), { agent, error: short(res.error, 400), kind: run.exhausted[agent] ? 'quota' : network ? 'network' : 'error', at: new Date().toISOString() }];
       const reason = run.exhausted[agent] ? 'se quedó sin cuota' : network ? 'tuvo un error de red' : 'falló';
-      if (task.failedBy.length >= MAX_ATTEMPTS_PER_TASK || !this.reassign(run, task, reason)) {
+      if (task.failedBy.length >= MAX_ATTEMPTS_PER_TASK) {
         task.status = 'failed';
         task.error = res.error;
+      } else if (!this.reassign(run, task, reason)) {
+        if (network && task.requires.length && !run.exhausted[agent]) {
+          // Es la única IA capaz (p. ej. de generar imágenes) y el fallo es de red: se espera y se le vuelve a dar.
+          task.status = 'pending';
+          task.notBefore = new Date(Date.now() + CAPABLE_RETRY_DELAY_MS).toISOString();
+          this.post(run, 'aiteam', 'all', `${task.id} requiere ${describeRequires(task.requires)}: se reintenta con ${AGENTS[agent].name} en ${CAPABLE_RETRY_DELAY_MS / 1000} s (error de red).`);
+        } else {
+          task.status = 'failed';
+          task.error = task.requires.length
+            ? `Requiere ${describeRequires(task.requires)} y ninguna otra IA capaz está disponible. Último error de ${AGENTS[agent].name}: ${short(res.error, 300)}`
+            : res.error;
+        }
       }
       this.touch(run);
       return;

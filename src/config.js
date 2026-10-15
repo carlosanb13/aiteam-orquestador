@@ -18,19 +18,23 @@ export const DEFAULT_CONFIG = {
       enabled: true,
       model: '',
       profile:
-        'Arquitectura de software, refactorizaciones grandes, razonamiento sobre bases de código extensas, código limpio y mantenible, revisión de código minuciosa.',
+        'Arquitectura de software, refactorizaciones grandes, razonamiento sobre bases de código extensas, código limpio y mantenible, revisión de código minuciosa. No genera imágenes.',
+      // Capacidades especiales además de programar: "images" (generar imágenes) y "browser" (usar el navegador).
+      capabilities: [],
     },
     codex: {
       enabled: true,
       model: '',
       profile:
-        'Implementación rápida y precisa, algoritmos, depuración de errores concretos, scripts, tests unitarios y tareas de backend bien acotadas.',
+        'Implementación rápida y precisa, algoritmos, depuración de errores concretos, scripts, tests unitarios y tareas de backend bien acotadas. Puede generar imágenes.',
+      capabilities: ['images'],
     },
     gemini: {
       enabled: true,
       model: '',
       profile:
         'Contexto muy largo (leer muchos archivos a la vez), documentación, interfaces y frontend, investigación en la web, generación de imágenes y uso del navegador.',
+      capabilities: ['images', 'browser'],
     },
   },
 };

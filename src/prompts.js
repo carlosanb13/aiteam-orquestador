@@ -1,5 +1,8 @@
 import { AGENTS } from './agents.js';
 import { loadConfig } from './config.js';
+import { CAPABILITY_IDS, agentCapabilities, capabilitiesText, describeRequires } from './capabilities.js';
+
+const agentNames = () => Object.fromEntries(Object.values(AGENTS).map((a) => [a.id, a.name]));
 
 const JSON_RULE = `Termina SIEMPRE tu respuesta con un bloque JSON válido delimitado exactamente así:
 <<<JSON
@@ -35,6 +38,9 @@ ${run.goal}
 EQUIPO DISPONIBLE:
 ${teamDescription(run.agents)}
 
+CAPACIDADES ESPECIALES (además de programar, que hacen todas):
+${capabilitiesText(run.agents, agentNames())}
+
 ARCHIVOS DEL REPOSITORIO:
 ${files || '(repositorio vacío)'}
 
@@ -44,16 +50,17 @@ Divide el objetivo en entre 2 y 8 subtareas concretas. Reglas:
 - Cada subtarea debe poder hacerse de forma autónoma y, en lo posible, tocar archivos distintos a las demás para evitar conflictos al fusionar.
 - Usa "dependsOn" solo cuando una subtarea necesite de verdad el resultado de otra.
 - "kind" es una etiqueta corta del tipo de trabajo (arquitectura, backend, frontend, tests, documentación, depuración, investigación...).
+- "requires" lista las capacidades especiales imprescindibles para la subtarea (${CAPABILITY_IDS.join(", ")}). Por ejemplo, generar un logo como imagen PNG requiere "images"; dibujar un logo como SVG con código no requiere nada. Si una subtarea mezcla generar una imagen con otras cosas, separa la generación de la imagen en su propia subtarea.
 - No asignes responsables: el equipo lo negociará después.
 - Escribe los títulos y descripciones en español; las descripciones deben ser lo bastante detalladas para que otra IA las ejecute sin más contexto.
 
 ${JSON_RULE}
-Formato: {"tasks":[{"id":"t1","title":"...","description":"...","kind":"...","dependsOn":[]}]}`;
+Formato: {"tasks":[{"id":"t1","title":"...","description":"...","kind":"...","dependsOn":[],"requires":[]}]}`;
 }
 
 export function bidPrompt(run, agentId) {
   const tasks = run.tasks
-    .map((t) => `- id: ${t.id}\n  título: ${t.title}\n  tipo: ${t.kind}\n  descripción: ${t.description}`)
+    .map((t) => `- id: ${t.id}\n  título: ${t.title}\n  tipo: ${t.kind}${t.requires?.length ? `\n  requiere: ${describeRequires(t.requires)}` : ''}\n  descripción: ${t.description}`)
     .join('\n');
   return `[[KIND:bid]]
 Formas parte de un equipo de IAs que va a repartirse un trabajo. Tú eres "${agentId}" (${AGENTS[agentId].name}).
@@ -67,6 +74,7 @@ SUBTAREAS:
 ${tasks}
 
 Puntúa de 0 a 10 lo adecuado que eres TÚ para cada subtarea, comparándote honestamente con el resto del equipo. Un 10 significa "soy claramente el mejor del equipo para esto"; un 0, "otro lo haría mucho mejor". No inflar las notas: el reparto se hace con ellas y también se reparte la carga para trabajar en paralelo.
+Tus capacidades especiales: ${agentCapabilities(agentId).length ? describeRequires(agentCapabilities(agentId)) : 'ninguna (solo programar, leer y escribir archivos)'}. Si una subtarea requiere una capacidad que no tienes, ponle 0.
 Puntúa también lo adecuado que eres para REVISAR código de otros en este proyecto.
 No modifiques ningún archivo.
 

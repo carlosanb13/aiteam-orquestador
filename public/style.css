@@ -520,3 +520,6 @@ button .i { margin-right: 2px; }
 .notif-row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
 details.attempts { margin-top: 4px; font-size: 12px; }
 details.attempts summary { cursor: pointer; color: var(--muted); }
+.badge.req { color: var(--accent); margin-left: 4px; }
+.warn-text { color: var(--warn); }
+.caps { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
