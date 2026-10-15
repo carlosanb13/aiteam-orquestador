@@ -114,3 +114,13 @@ export async function hasCommitsSince(repoRoot, baseCommit, branch) {
   const res = await git(repoRoot, ['rev-list', '--count', `${baseCommit}..${branch}`], { allowFail: true });
   return Number(res.stdout.trim()) > 0;
 }
+
+/** Ejecuta Git con un índice temporal, sin alterar el índice del worktree. */
+export function gitWithEnv(cwd, args, env) {
+  return new Promise((resolve, reject) => {
+    execFile('git', args, { cwd, env: { ...process.env, ...env }, maxBuffer: 64 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
+      if (err) reject(new Error(`git ${args.join(' ')} falló: ${stderr || err.message}`));
+      else resolve({ stdout: stdout.toString(), stderr: stderr.toString() });
+    });
+  });
+}

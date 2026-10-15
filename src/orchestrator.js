@@ -8,6 +8,7 @@ import { AGENTS, invokeAgent, isNetworkError } from './agents.js';
 import { CAPABILITIES, canDo, describeRequires, detectRequires, missingFor } from './capabilities.js';
 import { DATA_DIR, loadConfig } from './config.js';
 import { killTree, runShell } from './runner.js';
+import { Bus } from './bus.js';
 
 const RUNS_DIR = path.join(DATA_DIR, 'runs');
 const ACTIVE = new Set(['planning', 'bidding', 'running', 'reviewing', 'integrating', 'attacking', 'testing']);
@@ -74,6 +75,7 @@ export class Orchestrator extends EventEmitter {
   runs = new Map();
   procs = new Map();
   saveTimers = new Map();
+  bus = new Bus(this);
 
   constructor() {
     super();
@@ -83,6 +85,9 @@ export class Orchestrator extends EventEmitter {
       try {
         const run = JSON.parse(fs.readFileSync(path.join(RUNS_DIR, file), 'utf8'));
         run.exhausted ??= {};
+        this.bus.init(run);
+        for (const m of run.messages) if (m.kind === 'ask' && m.status === 'pending') m.status = 'interrupted';
+        for (const g of run.gates) if (g.status === 'pending' && g.kind !== 'plan_approval') g.status = 'interrupted';
         if (ACTIVE.has(run.status)) {
           run.status = 'interrupted';
           run.error = 'El servidor se detuvo mientras esta tarea estaba en curso.';
@@ -135,8 +140,7 @@ export class Orchestrator extends EventEmitter {
   }
 
   post(run, from, to, text) {
-    run.board.push({ ts: new Date().toISOString(), from, to: to || 'all', text: short(text, 2000) });
-    this.touch(run);
+    return this.bus.post(run, { from, to, text: short(text, 2000) });
   }
 
   setStatus(run, status, phase) {
@@ -206,6 +210,51 @@ export class Orchestrator extends EventEmitter {
     return { ...(last ?? { ok: false, error: 'No queda ninguna IA disponible.' }), agent: null };
   }
 
+  /** Las marcas del agente se procesan tras su turno; la respuesta reanuda esa subtarea. */
+  async handleSignals(run, task, agent, response) {
+    const signals = [];
+    for (const m of response.json?.messages ?? []) {
+      if (m?.text && !m.kind) this.post(run, agent, String(m.to ?? 'all'), m.text);
+      else if (m?.kind) signals.push(m);
+    }
+    for (const line of String(response.text ?? '').split(/\r?\n/)) {
+      const match = line.match(/^\[\[(ASK|ESCALATE):([^:\]]+):([^\]]+)\]\]\s*(.+)$/);
+      if (match) signals.push({ kind: match[1].toLowerCase(), to: match[2], text: match[4], threadId: match[3] });
+    }
+    for (const signal of signals) {
+      const to = String(signal.to ?? 'user');
+      const text = String(signal.text ?? '').trim();
+      if (!text) continue;
+      if (signal.kind === 'escalate' || signal.kind === 'escalation') {
+        this.bus.post(run, { from: agent, to: 'user', text, kind: 'escalation', taskId: task.id });
+        const gate = this.bus.gate(run, { kind: 'escalation', question: text, options: ['continue', 'cancel'] });
+        task.status = 'escalated';
+        this.touch(run);
+        const choice = await this.bus.waitForGate(gate);
+        if (choice !== 'continue') throw new Error(`Escalación de ${task.id} cancelada.`);
+        task.status = 'running';
+      } else if (signal.kind === 'ask') {
+        if (to !== 'user' && !run.agents.includes(to)) throw new Error('Destinatario de pregunta desconocido.');
+        const { message, promise } = this.bus.ask(run, { from: agent, to, text, taskId: task.id });
+        task.status = 'waiting_reply';
+        this.touch(run);
+        if (to !== 'user') {
+          const answer = await this.call(run, to, `[[KIND:reply]]\n${agent} pregunta sobre ${task.id}: ${text}\nResponde brevemente en español.`, { cwd: run.repoPath, label: `Responder a ${agent}` });
+          this.bus.reply(run, message.id, to, answer.ok ? (answer.json?.answer ?? answer.text) : `No pude responder: ${answer.error}`);
+        }
+        const reply = await promise;
+        task.status = 'running';
+        this.touch(run);
+        if (!reply) throw new Error(`La pregunta de ${task.id} agotó el tiempo de espera.`);
+        const wt = run.worktrees[agent];
+        response = await this.call(run, agent, `[[KIND:resume]]\nContinúa ${task.id} en esta copia. Respuesta de ${to}: ${reply.text}\nTermina con el bloque JSON de resumen habitual.`, { cwd: wt.path, mode: 'write', label: `${task.id}: continuar tras respuesta` });
+        if (!response.ok) throw new Error(response.error);
+        for (const m of response.json?.messages ?? []) if (m?.text && !m.kind) this.post(run, agent, String(m.to ?? 'all'), m.text);
+      }
+    }
+    return response;
+  }
+
   wrap(run, fn) {
     fn().catch((err) => {
       if (err instanceof Cancelled) return;
@@ -254,6 +303,8 @@ export class Orchestrator extends EventEmitter {
       exhausted: {},
       reviews: [],
       board: [],
+      messages: [],
+      gates: [],
       log: [],
       worktrees: {},
       integration: null,
@@ -272,6 +323,8 @@ export class Orchestrator extends EventEmitter {
     const run = this.runs.get(id);
     if (!run) throw new Error('No existe esa tarea.');
     if (run.status !== 'awaiting_approval') throw new Error('Este plan no está esperando aprobación.');
+    const gate = run.gates?.find((g) => g.kind === 'plan_approval' && g.status === 'pending');
+    if (gate) this.bus.decide(run, gate.id, 'approve');
     for (const t of run.tasks) {
       const a = assignments[t.id];
       if (a && run.agents.includes(a)) t.assignee = a;
@@ -284,6 +337,7 @@ export class Orchestrator extends EventEmitter {
     const run = this.runs.get(id);
     if (!run) throw new Error('No existe esa tarea.');
     run.cancelled = true;
+    this.bus.cancel(run);
     for (const child of this.procs.get(id) ?? []) {
       child.cancelled = true;
       killTree(child);
@@ -370,6 +424,7 @@ export class Orchestrator extends EventEmitter {
     if (run.autoApprove) {
       await this.execute(run);
     } else {
+      this.bus.gate(run, { kind: 'plan_approval', question: '¿Aprobar el reparto y empezar?', options: ['approve', 'cancel'] });
       this.setStatus(run, 'awaiting_approval', 'Revisa el reparto y apruébalo para empezar');
     }
   }
@@ -529,12 +584,13 @@ export class Orchestrator extends EventEmitter {
       this.touch(run);
       return;
     }
+    res = await this.handleSignals(run, task, agent, res);
     task.summary = short(res.json?.summary ?? res.text, 1500);
-    for (const m of res.json?.messages ?? []) if (m?.text) this.post(run, agent, String(m.to ?? 'all'), m.text);
     task.changed = await G.commitAll(wt.path, `[${agent}] ${task.id}: ${task.title}`);
     if (!task.changed) this.log(run, agent, `ℹ ${task.id} terminó sin modificar archivos.`);
     task.status = 'done';
     task.finishedAt = new Date().toISOString();
+    this.bus.post(run, { from: agent, to: run.coordinator, text: task.summary, kind: 'worker_done', taskId: task.id });
     this.touch(run);
   }
 
