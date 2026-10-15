@@ -6,10 +6,35 @@ import { loadConfig } from './config.js';
 import { recordClaudeRateLimit, recordCall, touchUsage } from './usage.js';
 
 export const AGENTS = {
-  claude: { id: 'claude', name: 'Claude', vendor: 'Anthropic · Claude Code', cli: 'claude', color: '#d97757' },
-  codex: { id: 'codex', name: 'ChatGPT', vendor: 'OpenAI · Codex CLI', cli: 'codex', color: '#10a37f' },
+  claude: {
+    id: 'claude',
+    name: 'Claude',
+    handle: 'claude',
+    vendor: 'Anthropic · Claude Code',
+    tagline: 'Arquitectura, refactorizaciones y revisión de código',
+    cli: 'claude',
+    color: '#d97757',
+  },
+  codex: {
+    id: 'codex',
+    name: 'Codex',
+    handle: 'codex',
+    vendor: 'OpenAI · ChatGPT',
+    tagline: 'Implementación rápida, depuración y tests',
+    cli: 'codex',
+    color: '#10a37f',
+  },
   // Google retiró Gemini CLI para cuentas personales (incl. Google AI Pro); su sustituto es Antigravity CLI (agy).
-  gemini: { id: 'gemini', name: 'Gemini', vendor: 'Google · Antigravity CLI', cli: 'agy', color: '#4285f4' },
+  // El id interno sigue siendo "gemini" para no romper conversaciones y ajustes guardados.
+  gemini: {
+    id: 'gemini',
+    name: 'Antigravity',
+    handle: 'antigravity',
+    vendor: 'Google · Antigravity CLI',
+    tagline: 'Interfaces, imágenes, web y navegador',
+    cli: 'agy',
+    color: '#4285f4',
+  },
 };
 
 export const MOCK = process.argv.includes('--mock') || process.env.AITEAM_MOCK === '1';

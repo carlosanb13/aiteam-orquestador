@@ -9,6 +9,13 @@
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="apple-touch-icon" href="icon-192.png" />
     <meta name="theme-color" content="#1d1d1b" />
+    <script>
+      // Aplica el tema guardado antes de pintar, para que no parpadee.
+      try {
+        document.documentElement.dataset.theme = localStorage.getItem('aiteam.theme') || 'oscuro';
+        document.documentElement.dataset.accent = localStorage.getItem('aiteam.accent') || 'azul';
+      } catch {}
+    </script>
   </head>
   <body>
     <div class="layout" id="layout">
@@ -22,7 +29,7 @@
           </svg>
           <span>AITeam</span>
           <span id="mockBadge" class="badge warn" hidden>simulación</span>
-          <button id="settingsBtn" class="ghost icon-btn" title="Ajustes" aria-label="Ajustes">⚙</button>
+          <button id="settingsBtn" class="ghost icon-btn" title="Ajustes" aria-label="Ajustes"><svg class="i" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
         </div>
 
         <div class="sidebar-scroll">
@@ -31,7 +38,7 @@
         </div>
 
         <div class="team-panel">
-          <div class="sidebar-title row-title">Equipo y uso <button id="refreshUsage" class="small ghost" title="Actualizar el uso (consulta mínima a Claude)">↻</button></div>
+          <div class="sidebar-title row-title">Equipo y uso <button id="refreshUsage" class="small ghost" title="Actualizar el uso (consulta mínima a Claude)"><svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></svg></button></div>
           <div id="teamPanel"></div>
         </div>
       </aside>
@@ -42,7 +49,7 @@
         <div class="files-head">
           <b>Archivos</b>
           <span class="muted small-text" id="filesRootLabel"></span>
-          <button class="small ghost" id="filesClose" title="Cerrar">✕</button>
+          <button class="small ghost" id="filesClose" title="Cerrar"><svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
         </div>
         <input id="filesFilter" placeholder="Filtrar archivos…" autocomplete="off" />
         <div id="filesTree" class="files-tree"></div>
@@ -108,7 +115,7 @@
       <section class="panel narrow">
         <h1>Nueva conversación con el equipo</h1>
         <p class="muted">
-          Un chat donde hablas con todas tus IAs a la vez. Menciona a <b>@claude</b>, <b>@codex</b>, <b>@gemini</b> o <b>@equipo</b>;
+          Un chat donde hablas con todas tus IAs a la vez. Menciona a <b>@claude</b>, <b>@codex</b>, <b>@antigravity</b> o <b>@equipo</b>;
           ellas también pueden pedirse cosas entre sí. Trabajan sobre una copia aislada de tu proyecto y tú decides cuándo aplicar los cambios.
         </p>
         <form id="newChatForm" class="form">
@@ -137,6 +144,12 @@
     <dialog id="settingsDlg">
       <form id="settingsForm" method="dialog" class="form">
         <h2>Ajustes</h2>
+        <fieldset>
+          <legend>Apariencia</legend>
+          <div class="theme-grid" id="themeGrid"></div>
+          <div class="muted small-text" style="margin:10px 0 6px">Color de acento</div>
+          <div class="accent-row" id="accentRow"></div>
+        </fieldset>
         <label>
           <span>Autonomía de las IAs</span>
           <select name="autonomy">

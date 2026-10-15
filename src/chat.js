@@ -76,15 +76,15 @@ export function parseDelegations(text, members, self) {
 
 function teamText(members) {
   const cfg = loadConfig();
-  return members.map((id) => `- @${id} (${AGENTS[id].name}): ${cfg.agents[id]?.profile ?? ''}`).join('\n');
+  return members.map((id) => `- @${AGENTS[id].handle} (${AGENTS[id].name}): ${cfg.agents[id]?.profile ?? ''}`).join('\n');
 }
 
 function transcript(messages) {
   return messages
     .filter((m) => m.kind === 'message')
     .map((m) => {
-      const who = m.from === 'user' ? 'USUARIO' : m.from === 'system' ? 'SISTEMA' : `@${m.from}`;
-      const to = m.to?.length ? ` → ${m.to.map((t) => `@${t}`).join(', ')}` : '';
+      const who = m.from === 'user' ? 'USUARIO' : m.from === 'system' ? 'SISTEMA' : `@${AGENTS[m.from]?.handle ?? m.from}`;
+      const to = m.to?.length ? ` → ${m.to.map((t) => `@${AGENTS[t]?.handle ?? t}`).join(', ')}` : '';
       return `[${who}${to}]\n${m.text}`;
     })
     .join('\n\n');
@@ -93,7 +93,7 @@ function transcript(messages) {
 function chatPrompt(chat, agent, request, history, isNewSession, hop) {
   const others = chat.agents.filter((a) => a !== agent && !chat.exhausted?.[a]);
   return `[[KIND:chat]] [[HOP:${hop}]]
-Eres @${agent} (${AGENTS[agent].name}) y formas parte de AITeam, un equipo de IAs que conversa en un chat compartido con el usuario y entre sí.
+Eres @${AGENTS[agent].handle} (${AGENTS[agent].name}) y formas parte de AITeam, un equipo de IAs que conversa en un chat compartido con el usuario y entre sí.
 
 EQUIPO:
 ${teamText(chat.agents)}
@@ -113,9 +113,9 @@ TE TOCA RESPONDER A:
 Cómo trabajar en equipo:
 - Responde en español, de forma directa, como un compañero de trabajo. Si te piden un cambio, hazlo en los archivos y explica brevemente qué hiciste.
 ${others.length ? `- Si otra IA del equipo es más adecuada para una parte, o quieres que revise lo que hiciste, pídeselo escribiendo una línea aparte que empiece por su mención, por ejemplo:
-  @${others[0]}: revisa la función X de src/y.js y corrige lo que veas.
+  @${AGENTS[others[0]].handle}: revisa la función X de src/y.js y corrige lo que veas.
   Esa IA recibirá tu petición y responderá en el chat. Hazlo solo cuando aporte algo; no delegues por delegar.
-- Compañeros disponibles: ${others.map((a) => `@${a}`).join(', ')}.` : '- Ahora mismo eres la única IA en esta conversación.'}
+- Compañeros disponibles: ${others.map((a) => `@${AGENTS[a].handle}`).join(', ')}.` : '- Ahora mismo eres la única IA en esta conversación.'}
 - No te menciones a ti mismo y no hagas commits (se hacen automáticamente).`;
 }
 
@@ -205,7 +205,7 @@ export class ChatManager extends EventEmitter {
     this.addMessage(chat, {
       from: 'system',
       kind: 'notice',
-      text: `Conversación creada sobre una copia de ${info.root} (rama ${worktree.branch}). Menciona a ${members.map((a) => `@${a}`).join(', ')} o a @equipo.`,
+      text: `Conversación creada sobre una copia de ${info.root} (rama ${worktree.branch}). Menciona a ${members.map((a) => `@${AGENTS[a].handle}`).join(', ')} o a @equipo.`,
     });
     return chat;
   }
@@ -329,11 +329,11 @@ export class ChatManager extends EventEmitter {
     const msgs = chat.messages.filter((m) => m.id !== request.id);
     const full = transcript(msgs.slice(-40));
     const delta = transcript(msgs.slice(session.seen).filter((m) => m.from !== agent));
-    const fromLabel = request.from === 'user' ? 'USUARIO' : `@${request.from}`;
+    const fromLabel = request.from === 'user' ? 'USUARIO' : `@${AGENTS[request.from]?.handle ?? request.from}`;
     const req = {
       fromLabel,
       text: relayedFrom
-        ? `${request.text}\n\n(NOTA DEL SISTEMA: esta petición iba dirigida a @${relayedFrom}, pero se ha quedado sin cuota. Ahora te corresponde a ti: hazla tú como si te la hubieran pedido directamente.)`
+        ? `${request.text}\n\n(NOTA DEL SISTEMA: esta petición iba dirigida a @${AGENTS[relayedFrom].handle}, pero se ha quedado sin cuota. Ahora te corresponde a ti: hazla tú como si te la hubieran pedido directamente.)`
         : request.text,
     };
 
@@ -409,12 +409,66 @@ export class ChatManager extends EventEmitter {
         this.addMessage(chat, {
           from: 'system',
           kind: 'notice',
-          text: `Las IAs llevan ${MAX_HOPS} intercambios seguidos; se hace una pausa para que decidas cómo seguir. Menciona a @${d.to} si quieres que continúe.`,
+          text: `Las IAs llevan ${MAX_HOPS} intercambios seguidos; se hace una pausa para que decidas cómo seguir. Menciona a @${AGENTS[d.to].handle} si quieres que continúe.`,
         });
         break;
       }
       q.items.push({ agent: d.to, request: { ...reply, text: d.text, from: agent, id: reply.id }, hop: hop + 1 });
     }
+  }
+
+  /** Objetivo de revisión (ver review.js) de una conversación. */
+  reviewTarget(id) {
+    const chat = this.chats.get(id);
+    if (!chat) throw new Error('No existe esa conversación.');
+    chat.review ??= {};
+    return { repoPath: chat.repoPath, branch: chat.worktree.branch, worktree: chat.worktree.path, review: chat.review, chat };
+  }
+
+  assertIdle(chat) {
+    if (chat.working || this.queues.get(chat.id)?.items.length) throw new Error('Espera a que las IAs terminen su turno.');
+  }
+
+  saveReview(target) {
+    target.chat.review = target.review;
+    this.save(target.chat);
+  }
+
+  /** Pide a una IA cambios sobre un archivo concreto, como si el usuario lo escribiera en el chat. */
+  requestChanges(id, { file, agent, text }) {
+    const chat = this.chats.get(id);
+    if (!chat) throw new Error('No existe esa conversación.');
+    if (!chat.agents.includes(agent)) throw new Error('Esa IA no está en la conversación.');
+    if (!String(text ?? '').trim()) throw new Error('Escribe qué quieres que cambie.');
+    return this.post(id, `@${AGENTS[agent].handle} sobre \`${file}\`: ${String(text).trim()}`);
+  }
+
+  noticeApplied(chat, result) {
+    this.addMessage(chat, {
+      from: 'system',
+      kind: 'notice',
+      text: `Cambios aplicados a tu proyecto (rama ${result.branch}): ${result.files} archivo(s). Si es el propio AITeam, reinícialo para ver los cambios.`,
+    });
+  }
+
+  /** Conflictos al traer los cambios del proyecto: los resuelve la primera IA disponible. */
+  resolveSyncConflicts(chat, conflicts) {
+    const agent = this.available(chat)[0];
+    if (!agent) throw new Error('No hay ninguna IA disponible para resolver los conflictos.');
+    const msg = this.addMessage(chat, {
+      from: 'system',
+      kind: 'notice',
+      text: `Hay conflictos entre esta conversación y cambios recientes de tu proyecto (${conflicts.join(', ')}). ${AGENTS[agent].name} los va a resolver.`,
+    });
+    this.enqueue(chat, {
+      agent,
+      hop: MAX_HOPS,
+      request: {
+        id: msg.id,
+        from: 'user',
+        text: `Al traer a esta copia los últimos cambios del proyecto han aparecido conflictos de fusión en: ${conflicts.join(', ')}. Abre esos archivos, resuelve los marcadores de conflicto (<<<<<<<, =======, >>>>>>>) conservando la intención de ambos lados y deja el código coherente. No hagas commits.`,
+      },
+    });
   }
 
   async diff(id) {

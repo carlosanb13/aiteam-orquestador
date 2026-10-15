@@ -8,6 +8,7 @@ import os from 'node:os';
 import { AGENTS, MOCK, checkAgent, invokeAgent } from './src/agents.js';
 import { getUsage, onUsageChange } from './src/usage.js';
 import * as Projects from './src/projects.js';
+import * as Review from './src/review.js';
 import { loadConfig, saveConfig } from './src/config.js';
 
 const PORT = Number(process.env.PORT) || 4317;
@@ -33,6 +34,25 @@ chats.on('chat', (chat) => broadcast('chat', chat));
 chats.on('activity', (a) => broadcast('chat-activity', a));
 chats.on('removed', (r) => broadcast('chat-removed', r));
 onUsageChange(() => broadcast('usage', getUsage()));
+
+function reviewTarget(kind, id, { mustBeIdle = false } = {}) {
+  if (kind === 'chats') {
+    const t = chats.reviewTarget(id);
+    if (mustBeIdle) chats.assertIdle(t.chat);
+    return t;
+  }
+  const run = orchestrator.get(id);
+  if (!run) throw new Error('No existe esa tarea.');
+  if (run.status !== 'done' || !run.integration?.branch) throw new Error('La tarea todavía no tiene un resultado integrado.');
+  run.review ??= {};
+  return { repoPath: run.repoPath, branch: run.integration.branch, worktree: run.integration.worktree, review: run.review, run };
+}
+
+function saveReview(kind, t) {
+  if (kind === 'chats') return chats.saveReview(t);
+  t.run.review = t.review;
+  orchestrator.touch(t.run);
+}
 
 function knownPaths() {
   return [...orchestrator.runs.values()].map((r) => r.repoPath).concat([...chats.chats.values()].map((c) => c.repoPath));
@@ -95,6 +115,57 @@ const routes = [
       setTimeout(() => process.exit(0), 300);
     },
   ],
+  // ---- Revisión por archivo y aplicar al proyecto (conversaciones y tareas de equipo)
+  ['GET', /^\/api\/(chats|runs)\/([\w-]+)\/changes$/, async (req, res, m) => send(res, 200, await Review.listChanges(reviewTarget(m[1], m[2])))],
+  ['GET', /^\/api\/(chats|runs)\/([\w-]+)\/changes\/file$/, async (req, res, m, url) => send(res, 200, await Review.fileDiff(reviewTarget(m[1], m[2]), url.searchParams.get('path')))],
+  [
+    'POST',
+    /^\/api\/(chats|runs)\/([\w-]+)\/changes\/accept$/,
+    async (req, res, m) => {
+      const { file, accepted } = await readBody(req);
+      const t = reviewTarget(m[1], m[2]);
+      if (accepted === false) Review.unaccept(t, file);
+      else await Review.accept(t, file);
+      saveReview(m[1], t);
+      send(res, 200, { ok: true });
+    },
+  ],
+  [
+    'POST',
+    /^\/api\/(chats|runs)\/([\w-]+)\/changes\/reject$/,
+    async (req, res, m) => {
+      const t = reviewTarget(m[1], m[2], { mustBeIdle: true });
+      const changed = await Review.reject(t, (await readBody(req)).file);
+      saveReview(m[1], t);
+      send(res, 200, { ok: true, changed });
+    },
+  ],
+  [
+    'POST',
+    /^\/api\/(chats|runs)\/([\w-]+)\/apply$/,
+    async (req, res, m) => {
+      const t = reviewTarget(m[1], m[2], { mustBeIdle: true });
+      const label = m[1] === 'chats' ? `la conversación «${t.chat.title}»` : `la tarea «${t.run.goal.slice(0, 80)}»`;
+      const result = await Review.apply(t, `AITeam: aplica los cambios de ${label}`);
+      if (result.ok) {
+        saveReview(m[1], t);
+        if (t.chat) chats.noticeApplied(t.chat, result);
+      }
+      send(res, 200, result);
+    },
+  ],
+  [
+    'POST',
+    /^\/api\/chats\/([\w-]+)\/sync$/,
+    async (req, res, m) => {
+      const t = reviewTarget('chats', m[1], { mustBeIdle: true });
+      const result = await Review.syncFromProject(t);
+      if (!result.ok) chats.resolveSyncConflicts(t.chat, result.conflicts);
+      else chats.save(t.chat);
+      send(res, 200, result);
+    },
+  ],
+  ['POST', /^\/api\/chats\/([\w-]+)\/request-changes$/, async (req, res, m) => send(res, 201, chats.requestChanges(m[1], await readBody(req)))],
   ['GET', /^\/api\/usage$/, (req, res) => send(res, 200, getUsage())],
   [
     'POST',

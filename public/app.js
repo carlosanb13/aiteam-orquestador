@@ -1,3 +1,5 @@
+import { icon, emblem, userAvatar, iconizeLine } from './icons.js';
+
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -50,7 +52,7 @@ const fmtTime = (iso) => new Date(iso).toLocaleTimeString('es', { hour: '2-digit
 const fmtDate = (iso) => new Date(iso).toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 const agentTag = (id) => {
   const a = agentInfo(id);
-  return `<span class="agent-tag"><span class="dot" style="background:${a.color}"></span>${esc(a.name)}</span>`;
+  return `<span class="agent-tag">${emblem(id, 18)}${esc(a.name)}</span>`;
 };
 
 /** Aviso visible cuando el servidor de AITeam no responde. */
@@ -60,7 +62,7 @@ function setOffline(offline) {
     bar = document.createElement('div');
     bar.id = 'offlineBar';
     bar.className = 'offline-bar';
-    bar.innerHTML = '⚠ Sin conexión con el servidor de AITeam. Arráncalo con <code>npm start</code> en la carpeta de AITeam; esta página se reconectará sola.';
+    bar.innerHTML = icon('alert') + ' Sin conexión con el servidor de AITeam. Arráncalo con <code>npm start</code> en la carpeta de AITeam; esta página se reconectará sola.';
     document.body.prepend(bar);
   }
   bar.hidden = !offline;
@@ -115,7 +117,7 @@ function agentPickHtml() {
       const usable = a.installed && a.enabled !== false && a.working !== false;
       const note = !a.installed ? 'no instalado' : a.working === false ? 'no responde' : a.enabled === false ? 'desactivado' : esc(a.vendor);
       return `<label><input type="checkbox" name="agents" value="${a.id}" ${usable ? 'checked' : ''} />
-        <span><b style="color:${a.color}">${esc(a.name)}</b><br><span class="note">${note}</span></span></label>`;
+        ${emblem(a.id, 26)}<span><b style="color:${a.color}">${esc(a.name)}</b><br><span class="note">${note}</span></span></label>`;
     })
     .join('');
 }
@@ -129,6 +131,15 @@ function showNew(repo) {
   const main = $('#main');
   main.innerHTML = '';
   main.append($('#newRunTpl').content.cloneNode(true));
+
+  const goal = $('[name=goal]');
+  const goalMic = document.createElement('button');
+  goalMic.type = 'button';
+  goalMic.className = 'mic-btn small-mic';
+  goalMic.innerHTML = icon('mic', 18);
+  goalMic.title = 'Dictar el objetivo por voz (Ctrl+M)';
+  goal.insertAdjacentElement('afterend', goalMic);
+  attachDictation(goal, goalMic);
 
   const lastRepo = typeof repo === 'string' ? repo : localStorage.getItem('aiteam.repo');
   if (lastRepo) $('[name=repoPath]').value = lastRepo;
@@ -233,7 +244,7 @@ function renderRun() {
           <div class="title">${esc(t.title)} <span class="badge">${esc(t.kind)}</span></div>
           <details class="desc"><summary>Detalles</summary><div class="desc">${esc(t.description)}</div></details>
           ${t.dependsOn.length ? `<div class="desc">Depende de: ${t.dependsOn.map(esc).join(', ')}</div>` : ''}
-          ${t.reassignedFrom?.length ? `<div class="desc">↪ Reasignada (antes: ${t.reassignedFrom.map((a) => esc(agentInfo(a).name)).join(', ')})</div>` : ''}
+          ${t.reassignedFrom?.length ? `<div class="desc">${icon('relay', 12)} Reasignada (antes: ${t.reassignedFrom.map((a) => esc(agentInfo(a).name)).join(', ')})</div>` : ''}
           ${t.summary ? `<div class="summary">${esc(t.summary)}</div>` : ''}
           ${t.error ? `<div class="summary error">${esc(t.error)}</div>` : ''}
         </td>
@@ -289,7 +300,7 @@ function renderRun() {
     run.status === 'done' && integ
       ? `<section class="panel">
         <h3>Resultado</h3>
-        <p>Todo el trabajo integrado está en la rama <code>${esc(integ.branch)}</code>. <button class="small" id="runDiff">Ver cambios</button> Si te convence, fusiónalo en tu rama:</p>
+        <p>Todo el trabajo integrado está en la rama <code>${esc(integ.branch)}</code>. <button class="primary small" id="runDiff">Revisar y aplicar</button> O, si prefieres hacerlo a mano:</p>
         <div class="copy-row"><code>cd "${esc(run.repoPath)}" &amp;&amp; git diff ${esc(run.baseBranch)}...${esc(integ.branch)}</code><button class="small" data-copy>Copiar</button></div>
         <div class="copy-row"><code>cd "${esc(run.repoPath)}" &amp;&amp; git merge ${esc(integ.branch)}</code><button class="small" data-copy>Copiar</button></div>
         <p class="muted">Integrado: ${integ.merged.map((a) => esc(agentInfo(a).name)).join(', ') || 'nada'}${
@@ -322,7 +333,7 @@ function renderRun() {
       <div class="pipeline">${STEPS.map(([k, label]) => `<div class="step ${stepClass(run, k)}">${label}</div>`).join('')}</div>
       ${run.phase ? `<p class="phase">${esc(run.phase)}</p>` : ''}
       ${run.error ? `<p class="error">${esc(run.error)}</p>` : ''}
-      ${run.dirty ? '<p class="muted">⚠ El repositorio tenía cambios sin commit; las IAs trabajan sobre el último commit.</p>' : ''}
+      ${run.dirty ? '<p class="muted">' + icon('alert', 13) + ' El repositorio tenía cambios sin commit; las IAs trabajan sobre el último commit.</p>' : ''}
     </section>
     ${result}
     ${
@@ -353,7 +364,7 @@ function renderRun() {
       e.target.disabled = false;
     }
   });
-  $('#runDiff')?.addEventListener('click', () => showDiff(`/api/runs/${run.id}/diff`));
+  $('#runDiff')?.addEventListener('click', () => openReview('runs', run.id));
   $('#runFiles')?.addEventListener('click', () =>
     run.integration?.worktree && !run.cleaned
       ? openFiles(run.integration.worktree, 'resultado integrado')
@@ -396,7 +407,7 @@ function appendLog(entry, scroll = true) {
   if (!lane) return;
   const nearBottom = lane.scrollHeight - lane.scrollTop - lane.clientHeight < 40;
   const line = document.createElement('div');
-  line.innerHTML = `<span class="t">${fmtTime(entry.ts)}</span> ${esc(entry.text)}`;
+  line.innerHTML = `<span class="t">${fmtTime(entry.ts)}</span> ${iconizeLine(entry.text, esc)}`;
   lane.append(line);
   if (scroll && nearBottom) lane.scrollTop = lane.scrollHeight;
 }
@@ -543,8 +554,8 @@ function md(text) {
       html += esc(parts[i])
         .replace(/`([^`\n]+)`/g, '<code>$1</code>')
         .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
-        .replace(/(^|\s)@(claude|codex|chatgpt|gemini|equipo|todos)\b/gi, (m, pre, name) => {
-          const id = { chatgpt: 'codex' }[name.toLowerCase()] ?? name.toLowerCase();
+        .replace(/(^|\s)@(claude|codex|chatgpt|gemini|antigravity|agy|equipo|todos)\b/gi, (m, pre, name) => {
+          const id = { chatgpt: 'codex', antigravity: 'gemini', agy: 'gemini' }[name.toLowerCase()] ?? name.toLowerCase();
           const color = state.agents.find((a) => a.id === id)?.color ?? 'var(--accent)';
           return `${pre}<span class="mention" style="color:${color}">@${name}</span>`;
         })
@@ -573,19 +584,26 @@ async function openChat(id) {
       <form class="composer" id="composer">
         <div class="mention-bar" id="mentionBar"></div>
         <div class="composer-row">
-          <textarea id="chatInput" rows="2" placeholder="Escribe a tu equipo… (@claude, @codex, @gemini, @equipo · /equipo objetivo lanza una tarea de equipo en paralelo)"></textarea>
+          <textarea id="chatInput" rows="2" placeholder="Escribe a tu equipo… (@claude, @codex, @antigravity, @equipo · /equipo objetivo lanza una tarea de equipo en paralelo)"></textarea>
+          <button type="button" class="mic-btn" id="chatMic" title="Dictar por voz (Ctrl+M)" aria-label="Dictar por voz">${icon('mic', 18)}</button>
           <button class="primary" type="submit">Enviar</button>
         </div>
-        <div class="muted hint">Intro envía · Mayús+Intro salto de línea · Sin mención responde la última IA que habló.</div>
+        <div class="muted hint">Intro envía · Mayús+Intro salto de línea · Ctrl+M para dictar · Sin mención responde la última IA que habló.</div>
       </form>
     </div>`;
 
   $('#mentionBar').innerHTML =
-    chat.agents.map((a) => `<button type="button" class="small mention-btn" data-mention="${a}" style="color:${agentInfo(a).color}">@${a}</button>`).join('') +
-    `<button type="button" class="small mention-btn" data-mention="equipo">@equipo</button>
-     <button type="button" class="small mention-btn" data-mention="/equipo">/equipo</button>`;
+    chat.agents
+      .map((a) => {
+        const info = agentInfo(a);
+        return `<button type="button" class="mention-btn" data-mention="${esc(info.handle ?? a)}" title="${esc(info.vendor ?? '')}">
+          ${emblem(a, 22)}<span><b>@${esc(info.handle ?? a)}</b><small>${esc(info.tagline ?? '')}</small></span></button>`;
+      })
+      .join('') +
+    `<button type="button" class="mention-btn" data-mention="equipo" title="Todas las IAs de la conversación">${icon('user', 18)}<span><b>@equipo</b><small>Todas responden por turnos</small></span></button>
+     <button type="button" class="mention-btn" data-mention="/equipo" title="Planificar, repartir y trabajar en paralelo">${icon('bolt', 18)}<span><b>/equipo</b><small>Tarea en paralelo con revisión</small></span></button>`;
   $('#mentionBar').addEventListener('click', (e) => {
-    const m = e.target.dataset?.mention;
+    const m = e.target.closest('[data-mention]')?.dataset.mention;
     if (!m) return;
     const input = $('#chatInput');
     input.value = m.startsWith('/') ? `${m} ${input.value.replace(/^\/equipo\s*/, '')}` : `${input.value}${input.value && !input.value.endsWith(' ') ? ' ' : ''}@${m} `;
@@ -602,8 +620,10 @@ async function openChat(id) {
       $('#composer').requestSubmit();
     }
   });
+  const mic = attachDictation(input, $('#chatMic'));
   $('#composer').addEventListener('submit', async (e) => {
     e.preventDefault();
+    mic.stop();
     const text = input.value.trim();
     if (!text) return;
     input.value = '';
@@ -636,24 +656,24 @@ function renderChatHead() {
     </div>
     <div class="actions">
       ${chat.working ? '<button class="danger" id="chatStop">Detener</button>' : ''}
-      <select id="chatAutonomy" title="Qué pueden hacer las IAs en esta conversación">
-        <option value="edits" ${(chat.autonomy ?? state.defaultAutonomy) === 'edits' ? 'selected' : ''}>🔒 Modo seguro</option>
-        <option value="full" ${(chat.autonomy ?? state.defaultAutonomy) === 'full' ? 'selected' : ''}>⚡ Control total</option>
-      </select>
-      <button id="chatFiles">Archivos</button>
-      <button id="chatDiff">Ver cambios</button>
+      <div class="seg" id="chatAutonomy" title="Qué pueden hacer las IAs en esta conversación">
+        <button type="button" data-mode="edits" class="${(chat.autonomy ?? state.defaultAutonomy) !== 'full' ? 'on' : ''}" title="Solo editan archivos en la copia">${icon('lock')} Seguro</button>
+        <button type="button" data-mode="full" class="${(chat.autonomy ?? state.defaultAutonomy) === 'full' ? 'on warn-on' : ''}" title="Pueden ejecutar comandos e instalar cosas">${icon('bolt')} Control total</button>
+      </div>
+      <button id="chatFiles">${icon('folder')} Archivos</button>
+      <button id="chatDiff" class="primary">${icon('fileDiff')} Revisar cambios</button>
       <button class="ghost" id="chatDelete" title="Borra la conversación y su copia de trabajo (la rama se conserva)">Eliminar</button>
     </div>`;
   $('#chatStop')?.addEventListener('click', () => api('POST', `/api/chats/${chat.id}/stop`));
-  $('#chatDiff').addEventListener('click', () => showDiff(`/api/chats/${chat.id}/diff`));
+  $('#chatDiff').addEventListener('click', () => openReview('chats', chat.id));
   $('#chatFiles').addEventListener('click', () => openFiles(chat.worktree.path, 'copia de la conversación'));
-  $('#chatAutonomy').addEventListener('change', async (e) => {
-    const value = e.target.value;
+  $('#chatAutonomy').addEventListener('click', async (e) => {
+    const value = e.target.closest('[data-mode]')?.dataset.mode;
+    if (!value || value === (chat.autonomy ?? state.defaultAutonomy)) return;
     if (
       value === 'full' &&
       !confirm('Con "Control total" las IAs pueden ejecutar cualquier comando en tu PC (instalar programas, lanzar servidores, borrar archivos…) sin pedirte permiso. ¿Activarlo en esta conversación?')
     ) {
-      e.target.value = 'edits';
       return;
     }
     await api('PATCH', `/api/chats/${chat.id}`, { autonomy: value });
@@ -673,10 +693,10 @@ function messageHtml(m) {
     return `<div class="sys ${m.kind === 'error' ? 'error' : ''}">${esc(m.text)}${run}</div>`;
   }
   if (m.from === 'user') {
-    return `<div class="bubble-row user"><div class="bubble">${md(m.text)}<div class="when">${fmtTime(m.ts)}</div></div></div>`;
+    return `<div class="bubble-row user"><div class="bubble">${md(m.text)}<div class="when">${fmtTime(m.ts)}</div></div><div class="avatar">${userAvatar(34)}</div></div>`;
   }
   const a = agentInfo(m.from);
-  const to = m.to?.length ? ` <span class="muted">→ ${m.to.map((t) => `<span style="color:${agentInfo(t).color}">@${esc(t)}</span>`).join(', ')}</span>` : '';
+  const to = m.to?.length ? ` <span class="muted">→ ${m.to.map((t) => `<span style="color:${agentInfo(t).color}">@${esc(agentInfo(t).handle ?? t)}</span>`).join(', ')}</span>` : '';
   const meta = m.meta ?? {};
   const images = meta.changed ? messageFiles(meta).filter(isImage) : [];
   const extras = [
@@ -688,11 +708,11 @@ function messageHtml(m) {
           })
           .join('')}</div>`
       : '',
-    meta.changed ? `<details><summary>📝 Archivos cambiados</summary><pre class="output">${esc(meta.stat)}</pre></details>` : '',
-    meta.activity?.length ? `<details><summary>Actividad (${meta.activity.length})</summary><div class="activity">${meta.activity.map((l) => `<div>${esc(l)}</div>`).join('')}</div></details>` : '',
+    meta.changed ? `<details><summary>${icon('file', 13)} Archivos cambiados</summary><pre class="output">${esc(meta.stat)}</pre></details>` : '',
+    meta.activity?.length ? `<details><summary>Actividad (${meta.activity.length})</summary><div class="activity">${meta.activity.map((l) => `<div>${iconizeLine(l, esc)}</div>`).join('')}</div></details>` : '',
   ].join('');
   return `<div class="bubble-row agent">
-    <div class="avatar" style="background:${a.color}">${esc(a.name[0])}</div>
+    <div class="avatar">${emblem(m.from, 34)}</div>
     <div class="bubble" style="border-left-color:${a.color}">
       <div class="who"><b style="color:${a.color}">${esc(a.name)}</b>${to} <span class="when">${fmtTime(m.ts)}${meta.durationMs ? ` · ${Math.round(meta.durationMs / 1000)}s` : ''}</span></div>
       <div class="text">${md(m.text)}</div>
@@ -707,10 +727,10 @@ function liveHtml() {
   const a = agentInfo(w.agent);
   const lines = (state.live[w.agent] ?? []).slice(-8);
   return `<div class="bubble-row agent live">
-    <div class="avatar" style="background:${a.color}">${esc(a.name[0])}</div>
+    <div class="avatar">${emblem(w.agent, 34)}</div>
     <div class="bubble" style="border-left-color:${a.color}">
       <div class="who"><b style="color:${a.color}">${esc(a.name)}</b> <span class="typing">trabajando<span>.</span><span>.</span><span>.</span></span></div>
-      <div class="activity" id="liveActivity">${lines.map((l) => `<div>${esc(l)}</div>`).join('')}</div>
+      <div class="activity" id="liveActivity">${lines.map((l) => `<div>${iconizeLine(l, esc)}</div>`).join('')}</div>
     </div>
   </div>`;
 }
@@ -782,7 +802,7 @@ events.addEventListener('chat-activity', (e) => {
   (state.live[agent] ??= []).push(text);
   const box = $('#liveActivity');
   if (box) {
-    box.innerHTML = state.live[agent].slice(-8).map((l) => `<div>${esc(l)}</div>`).join('');
+    box.innerHTML = state.live[agent].slice(-8).map((l) => `<div>${iconizeLine(l, esc)}</div>`).join('');
     const msgs = $('#chatMsgs');
     if (msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 160) msgs.scrollTop = msgs.scrollHeight;
   }
@@ -832,24 +852,24 @@ function renderSidebar() {
       const items = [
         ...chats.map(
           (c) => `<li data-chat="${c.id}" class="${state.view === 'chat' && state.chat?.id === c.id ? 'active' : ''}">
-            <span class="ico">💬</span><span class="label">${esc(c.title)}</span>
+            <span class="ico">${icon('chat', 14)}</span><span class="label">${esc(c.title)}</span>
             ${c.working ? `<span class="dot pulse" style="background:${agentInfo(c.working.agent).color}" title="${esc(agentInfo(c.working.agent).name)} trabajando"></span>` : ''}
           </li>`,
         ),
         ...runs.map(
           (r) => `<li data-run="${r.id}" class="${state.view === 'run' && state.current?.id === r.id ? 'active' : ''}">
-            <span class="ico">⚡</span><span class="label">${esc(r.goal)}</span>${badge(STATUS[r.status] ?? [r.status, ''])}
+            <span class="ico">${icon('bolt', 14)}</span><span class="label">${esc(r.goal)}</span>${badge(STATUS[r.status] ?? [r.status, ''])}
           </li>`,
         ),
       ].join('');
       return `<div class="project">
         <div class="project-head" data-toggle="${esc(key)}" title="${esc(p.path)}">
-          <span class="caret">${open ? '▾' : '▸'}</span>
+          <span class="caret">${icon(open ? 'chevDown' : 'chevRight', 13)}</span>
           <span class="project-name">${esc(p.name)}</span>
           <span class="project-actions">
-            <button class="small ghost" data-new-chat="${esc(p.path)}" title="Nueva conversación">💬+</button>
-            <button class="small ghost" data-new-run="${esc(p.path)}" title="Nueva tarea de equipo (en paralelo)">⚡+</button>
-            <button class="small ghost" data-files="${esc(p.path)}" title="Ver archivos">📁</button>
+            <button class="small ghost" data-new-chat="${esc(p.path)}" title="Nueva conversación">${icon('chatPlus', 15)}</button>
+            <button class="small ghost" data-new-run="${esc(p.path)}" title="Nueva tarea de equipo (en paralelo)">${icon('boltPlus', 15)}</button>
+            <button class="small ghost" data-files="${esc(p.path)}" title="Ver archivos">${icon('folder', 15)}</button>
           </span>
         </div>
         ${open ? `<ul class="run-list">${items || '<li class="muted small-text" style="cursor:default">Sin conversaciones todavía.</li>'}</ul>` : ''}
@@ -959,7 +979,7 @@ function renderTeam() {
           : `<div class="meter muted small-text">${u?.note ?? 'Sin datos de uso todavía.'}${u?.callsToday ? ` · ${u.callsToday} peticiones hoy` : ''}</div>`;
       return `<div class="team-agent">
         <div class="team-row" title="${esc(title)}">
-          <span class="dot ${cls}"></span><b style="color:${a.color}">${esc(a.name)}</b>
+          <span class="dot ${cls}"></span>${emblem(a.id, 18)}<b style="color:${a.color}">${esc(a.name)}</b>
           <button class="small ghost" data-test="${a.id}" ${a.installed ? '' : 'disabled'}>Probar</button>
         </div>
         ${meters}
@@ -1038,7 +1058,7 @@ function renderFiles() {
     for (const [name, child] of [...node.dirs.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
       const p = prefix + name;
       const open = filter || files.open.has(p);
-      html += `<div class="ft-dir" data-dir="${esc(p)}" style="padding-left:${depth * 12}px">${open ? '▾' : '▸'} ${esc(name)}</div>`;
+      html += `<div class="ft-dir" data-dir="${esc(p)}" style="padding-left:${depth * 12}px">${icon(open ? 'chevDown' : 'chevRight', 12)} ${icon('folder', 13)} ${esc(name)}</div>`;
       if (open) html += render(child, `${p}/`, depth + 1);
     }
     for (const f of node.files) {
@@ -1069,7 +1089,7 @@ $('#filesTree').addEventListener('click', async (e) => {
     const src = imgUrl(files.root, file);
     view.innerHTML = `<div class="file-view-head"><code>${esc(file)}</code>
         <span>${file.toLowerCase().endsWith('.svg') ? '<button class="small ghost" id="svgCode">Ver código</button>' : ''}
-        <button class="small ghost" id="fileViewClose">✕</button></span></div>
+        <button class="small ghost" id="fileViewClose">${icon('close')}</button></span></div>
       <div class="img-preview checker" title="Clic para ampliar"><img src="${src}" alt="${esc(file)}" data-zoom="${esc(src)}" data-name="${esc(file)}" /></div>`;
     $('#fileViewClose').addEventListener('click', () => (view.hidden = true));
     $('#svgCode')?.addEventListener('click', () => showFileCode(file));
@@ -1089,7 +1109,7 @@ async function showFileCode(file) {
           .split('\n')
           .map((l, i) => `<span class="ln">${i + 1}</span>${esc(l)}`)
           .join('\n')}</pre>${f.truncated ? '<p class="muted">(mostrando solo el principio)</p>' : ''}`;
-    view.innerHTML = `<div class="file-view-head"><code>${esc(f.path)}</code><button class="small ghost" id="fileViewClose">✕</button></div>${body}`;
+    view.innerHTML = `<div class="file-view-head"><code>${esc(f.path)}</code><button class="small ghost" id="fileViewClose">${icon('close')}</button></div>${body}`;
     $('#fileViewClose').addEventListener('click', () => (view.hidden = true));
   } catch (err) {
     view.innerHTML = `<p class="error">${esc(err.message)}</p>`;
@@ -1132,6 +1152,325 @@ document.addEventListener('click', (e) => {
   $('#imgName').textContent = img.dataset.name ?? '';
   imgDlg.showModal();
 });
+
+// ------------------------------------------------------------ revisión por archivo y aplicar
+
+const reviewDlg = document.createElement('dialog');
+reviewDlg.className = 'wide-dialog review-dlg';
+reviewDlg.innerHTML = `
+  <div class="dialog-head">
+    <div><h2>Revisar cambios</h2><div class="muted small-text" id="rvSub"></div></div>
+    <button class="ghost" data-close>Cerrar</button>
+  </div>
+  <div class="rv-body">
+    <div class="rv-files">
+      <div class="rv-files-head"><span id="rvCount" class="muted small-text"></span><button class="small ghost" id="rvAcceptAll">Aceptar todos</button></div>
+      <div id="rvList"></div>
+    </div>
+    <div class="rv-main" id="rvMain"><p class="muted">Elige un archivo.</p></div>
+  </div>
+  <div class="rv-foot">
+    <div id="rvMsg" class="rv-msg"></div>
+    <div class="actions">
+      <button id="rvSync" class="ghost" hidden title="Trae a esta conversación los cambios nuevos de tu proyecto">Traer cambios del proyecto</button>
+      <button id="rvApply" class="primary">Aplicar al proyecto</button>
+    </div>
+  </div>`;
+document.body.append(reviewDlg);
+reviewDlg.querySelector('[data-close]').addEventListener('click', () => reviewDlg.close());
+
+const rv = { kind: null, id: null, files: [], selected: null, info: null };
+
+async function openReview(kind, id) {
+  Object.assign(rv, { kind, id, selected: null });
+  $('#rvMain').innerHTML = '<p class="muted">Elige un archivo.</p>';
+  $('#rvMsg').innerHTML = '';
+  $('#rvSync').hidden = kind !== 'chats';
+  reviewDlg.showModal();
+  await loadReview();
+  if (rv.files.length) selectReviewFile(rv.files.find((f) => !f.accepted)?.file ?? rv.files[0].file);
+}
+
+const rvBase = () => `/api/${rv.kind}/${rv.id}`;
+
+async function loadReview() {
+  try {
+    rv.info = await api('GET', `${rvBase()}/changes`);
+  } catch (err) {
+    $('#rvList').innerHTML = `<p class="error">${esc(err.message)}</p>`;
+    return;
+  }
+  rv.files = rv.info.files;
+  const accepted = rv.files.filter((f) => f.accepted).length;
+  $('#rvSub').textContent = `Se aplicará a tu proyecto en la rama ${rv.info.projectBranch}${rv.info.projectDirty ? ' · tiene cambios sin guardar' : ''}`;
+  $('#rvCount').textContent = rv.files.length ? `${accepted}/${rv.files.length} aceptados` : '';
+  $('#rvList').innerHTML = rv.files.length
+    ? rv.files
+        .map(
+          (f) => `<div class="rv-file ${rv.selected === f.file ? 'active' : ''} ${f.accepted ? 'ok' : ''}" data-rv-file="${esc(f.file)}" title="${esc(f.file)}">
+            <span class="rv-st st-${f.status}">${esc(f.status)}</span>
+            <span class="rv-name">${esc(f.file.split('/').pop())}<span class="muted small-text"> ${esc(f.file.split('/').slice(0, -1).join('/'))}</span></span>
+            <span class="rv-n"><span class="add">+${f.add}</span> <span class="del">-${f.del}</span></span>
+            <span class="rv-ok">${f.accepted ? icon('check', 14) : ''}</span>
+          </div>`,
+        )
+        .join('')
+    : '<p class="muted" style="padding:10px">No hay cambios pendientes: todo está aplicado en tu proyecto.</p>';
+  $('#rvApply').disabled = !rv.files.length;
+  $('#rvApply').textContent = rv.files.length ? `Aplicar al proyecto (${rv.files.length})` : 'Aplicar al proyecto';
+  $('#rvAcceptAll').hidden = !rv.files.some((f) => !f.accepted);
+}
+
+$('#rvList').addEventListener('click', (e) => {
+  const el = e.target.closest('[data-rv-file]');
+  if (el) selectReviewFile(el.dataset.rvFile);
+});
+
+function diffHtml(diff) {
+  return diff
+    .split('\n')
+    .filter((l) => !/^(diff --git|index |similarity|rename (from|to))/.test(l))
+    .map((l) => {
+      const cls = l.startsWith('+++') || l.startsWith('---') ? 'meta' : l.startsWith('+') ? 'add' : l.startsWith('-') ? 'del' : l.startsWith('@@') ? 'hunk' : '';
+      return `<div class="${cls}">${esc(l) || ' '}</div>`;
+    })
+    .join('');
+}
+
+async function selectReviewFile(file) {
+  rv.selected = file;
+  for (const el of document.querySelectorAll('.rv-file')) el.classList.toggle('active', el.dataset.rvFile === file);
+  const f = rv.files.find((x) => x.file === file);
+  const main = $('#rvMain');
+  main.innerHTML = '<p class="muted">Cargando…</p>';
+  let d;
+  try {
+    d = await api('GET', `${rvBase()}/changes/file?path=${encodeURIComponent(file)}`);
+  } catch (err) {
+    main.innerHTML = `<p class="error">${esc(err.message)}</p>`;
+    return;
+  }
+  const root = rv.kind === 'chats' ? state.chats.find((c) => c.id === rv.id) && state.chat?.worktree?.path : null;
+  const preview = isImage(file) && f.status !== 'D' && root ? `<div class="img-preview checker rv-img"><img src="${imgUrl(root, file)}" alt="" data-zoom="${imgUrl(root, file)}" data-name="${esc(file)}" /></div>` : '';
+  const agents = rv.kind === 'chats' ? (state.chat?.agents ?? []) : [];
+  main.innerHTML = `
+    <div class="rv-file-head">
+      <div><code>${esc(file)}</code> <span class="badge">${esc(f.statusLabel)}</span>${f.from ? ` <span class="muted small-text">(antes ${esc(f.from)})</span>` : ''}</div>
+      <div class="actions">
+        <button id="rvAccept" class="${f.accepted ? '' : 'ok-btn'}">${f.accepted ? 'Quitar aceptación' : icon('check') + ' Aceptar'}</button>
+        <button id="rvReject" class="danger" title="Deshace los cambios de este archivo en la copia de las IAs">${icon('close')} Rechazar</button>
+      </div>
+    </div>
+    ${preview}
+    <div class="diff rv-diff">${diffHtml(d.diff) || '<div class="muted">Sin diferencias de texto (archivo binario).</div>'}</div>
+    ${
+      agents.length
+        ? `<form class="rv-ask" id="rvAsk">
+            <select name="agent">${agents.map((a) => `<option value="${a}">${esc(agentInfo(a).name)}</option>`).join('')}</select>
+            <textarea name="text" rows="2" placeholder="Pedir cambios en este archivo… (ej.: usa una constante en vez de repetir el número)"></textarea>
+            <button type="button" class="mic-btn" id="rvMic" title="Dictar por voz">${icon('mic', 18)}</button>
+            <button class="primary">Pedir cambios</button>
+          </form>`
+        : ''
+    }`;
+
+  $('#rvAccept').addEventListener('click', async () => {
+    await api('POST', `${rvBase()}/changes/accept`, { file, accepted: !f.accepted });
+    await loadReview();
+    const next = !f.accepted ? rv.files.find((x) => !x.accepted && x.file !== file) : null;
+    selectReviewFile(next?.file ?? file);
+  });
+  $('#rvReject').addEventListener('click', async () => {
+    const what = f.status === 'A' ? 'Se borrará este archivo nuevo' : 'Se deshará lo que las IAs cambiaron en este archivo';
+    if (!confirm(`${what} (${file}). ¿Rechazarlo?`)) return;
+    try {
+      await api('POST', `${rvBase()}/changes/reject`, { file });
+      await loadReview();
+      if (rv.files.length) selectReviewFile((rv.files.find((x) => !x.accepted) ?? rv.files[0]).file);
+      else $('#rvMain').innerHTML = '<p class="muted">No quedan cambios.</p>';
+    } catch (err) {
+      alert(err.message);
+    }
+  });
+  const ask = $('#rvAsk');
+  if (ask) {
+    attachDictation(ask.text, $('#rvMic'));
+    ask.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await api('POST', `${rvBase()}/request-changes`, { file, agent: ask.agent.value, text: ask.text.value });
+        reviewDlg.close();
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+  }
+}
+
+$('#rvAcceptAll').addEventListener('click', async () => {
+  for (const f of rv.files.filter((x) => !x.accepted)) await api('POST', `${rvBase()}/changes/accept`, { file: f.file });
+  await loadReview();
+  if (rv.selected) selectReviewFile(rv.selected);
+});
+
+$('#rvApply').addEventListener('click', async () => {
+  const pending = rv.files.filter((f) => !f.accepted).length;
+  const msg = pending
+    ? `Hay ${pending} archivo(s) sin revisar que también se aplicarán. ¿Aplicar los ${rv.files.length} cambios a tu proyecto (rama ${rv.info.projectBranch})?`
+    : `¿Aplicar los ${rv.files.length} cambios a tu proyecto (rama ${rv.info.projectBranch})?`;
+  if (!confirm(msg)) return;
+  $('#rvApply').disabled = true;
+  try {
+    const r = await api('POST', `${rvBase()}/apply`);
+    if (r.ok) {
+      $('#rvMsg').innerHTML = `<span class="ok-text">${icon('checkCircle')} Aplicados ${r.files} archivo(s) a la rama ${esc(r.branch)} de tu proyecto.</span>`;
+      await loadReview();
+      $('#rvMain').innerHTML = '<p class="muted">Todo aplicado.</p>';
+    } else if (r.reason === 'conflict' && rv.kind === 'chats') {
+      $('#rvMsg').innerHTML = `<span class="error">${esc(r.error)}</span> <button class="small" id="rvFix">Que una IA lo resuelva</button>`;
+      $('#rvFix').addEventListener('click', syncFromProject);
+    } else {
+      $('#rvMsg').innerHTML = `<span class="error">${esc(r.error)}</span>`;
+    }
+  } catch (err) {
+    $('#rvMsg').innerHTML = `<span class="error">${esc(err.message)}</span>`;
+  } finally {
+    $('#rvApply').disabled = !rv.files.length;
+  }
+});
+
+async function syncFromProject() {
+  try {
+    const r = await api('POST', `${rvBase()}/sync`);
+    if (r.ok) {
+      $('#rvMsg').innerHTML = '<span class="ok-text">Esta conversación ya tiene los últimos cambios de tu proyecto.</span>';
+      await loadReview();
+    } else {
+      reviewDlg.close();
+    }
+  } catch (err) {
+    $('#rvMsg').innerHTML = `<span class="error">${esc(err.message)}</span>`;
+  }
+}
+$('#rvSync').addEventListener('click', syncFromProject);
+
+// ------------------------------------------------------------ dictado por voz
+
+const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+const dictationLang = () => (navigator.language?.toLowerCase().startsWith('es') ? navigator.language : 'es-ES');
+let activeDictation = null;
+
+/** Dictado con el reconocimiento de voz del navegador: escribe en el textarea mientras hablas. */
+function attachDictation(textarea, btn) {
+  const ctl = { stop() {} };
+  if (!SpeechRec) {
+    btn.disabled = true;
+    btn.title = 'Este navegador no admite dictado por voz (usa Edge o Chrome).';
+    return ctl;
+  }
+  let rec = null;
+  const setIdle = () => {
+    rec = null;
+    btn.classList.remove('rec');
+    btn.innerHTML = icon('mic', 18);
+    if (activeDictation === ctl) activeDictation = null;
+  };
+  ctl.stop = () => rec?.stop();
+  ctl.toggle = () => {
+    if (rec) return rec.stop();
+    activeDictation?.stop();
+    rec = new SpeechRec();
+    rec.lang = dictationLang();
+    rec.interimResults = true;
+    rec.continuous = true;
+    const base = textarea.value && !/\s$/.test(textarea.value) ? `${textarea.value} ` : textarea.value;
+    rec.onresult = (e) => {
+      let finalText = '';
+      let interim = '';
+      for (const r of e.results) (r.isFinal ? (finalText += r[0].transcript) : (interim += r[0].transcript));
+      textarea.value = base + finalText + interim;
+      textarea.dispatchEvent(new Event('input'));
+      textarea.scrollTop = textarea.scrollHeight;
+    };
+    rec.onerror = (e) => {
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        alert('AITeam no tiene permiso para usar el micrófono. Permítelo en el icono del candado de la barra de direcciones (o en Configuración de Windows → Privacidad → Micrófono).');
+      } else if (!['no-speech', 'aborted'].includes(e.error)) {
+        alert(`El dictado se detuvo: ${e.error}`);
+      }
+    };
+    rec.onend = setIdle;
+    rec.start();
+    activeDictation = ctl;
+    btn.classList.add('rec');
+    btn.innerHTML = icon('stop', 18);
+    textarea.focus();
+  };
+  btn.addEventListener('click', ctl.toggle);
+  textarea._dictation = ctl;
+  return ctl;
+}
+
+// Ctrl+M dicta en el cuadro de texto que tenga el foco (o en el del chat).
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey && e.key.toLowerCase() === 'm')) return;
+  const target = document.activeElement?._dictation ? document.activeElement : $('#chatInput');
+  if (target?._dictation) {
+    e.preventDefault();
+    target._dictation.toggle();
+  }
+});
+
+// ------------------------------------------------------------ apariencia
+
+const THEMES = [
+  ['oled', 'OLED', '#000000', '#0e0e10'],
+  ['oscuro', 'Oscuro', '#141413', '#262624'],
+  ['medianoche', 'Medianoche', '#0b1020', '#18213a'],
+  ['claro', 'Claro', '#f6f6f4', '#ffffff'],
+];
+const ACCENTS = [
+  ['azul', '#4f7cff'],
+  ['violeta', '#8b5cf6'],
+  ['esmeralda', '#10b981'],
+  ['ambar', '#f59e0b'],
+  ['rosa', '#ec4899'],
+  ['cian', '#06b6d4'],
+];
+
+function setLook(key, value) {
+  document.documentElement.dataset[key] = value;
+  try {
+    localStorage.setItem(`aiteam.${key}`, value);
+  } catch {
+    /* sin almacenamiento: solo para esta sesión */
+  }
+  renderAppearance();
+}
+
+function renderAppearance() {
+  const theme = document.documentElement.dataset.theme;
+  const accent = document.documentElement.dataset.accent;
+  const accentColor = ACCENTS.find((a) => a[0] === accent)?.[1] ?? '#4f7cff';
+  $('#themeGrid').innerHTML = THEMES.map(
+    ([id, label, bg, panel]) => `<button type="button" class="theme-card ${theme === id ? 'on' : ''}" data-theme-pick="${id}">
+      <span class="sw"><i style="background:${panel}"></i><i style="background:${bg};display:grid;place-items:center"><i style="width:40%;height:8px;border-radius:4px;background:${accentColor}"></i></i></span>
+      <span class="lbl" style="display:block">${label}</span></button>`,
+  ).join('');
+  $('#accentRow').innerHTML = ACCENTS.map(
+    ([id, color]) => `<button type="button" class="accent-dot ${accent === id ? 'on' : ''}" data-accent-pick="${id}" title="${id}" style="background:${color}"></button>`,
+  ).join('');
+}
+
+$('#themeGrid').addEventListener('click', (e) => {
+  const id = e.target.closest('[data-theme-pick]')?.dataset.themePick;
+  if (id) setLook('theme', id);
+});
+$('#accentRow').addEventListener('click', (e) => {
+  const id = e.target.closest('[data-accent-pick]')?.dataset.accentPick;
+  if (id) setLook('accent', id);
+});
+$('#settingsBtn').addEventListener('click', renderAppearance);
 
 // ------------------------------------------------------------ apagar
 

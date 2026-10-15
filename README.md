@@ -9,13 +9,23 @@ AITeam es el **orquestador**: las capacidades (programar, ejecutar comandos, ins
 ### 💬 Chat de equipo
 Un chat único donde hablas con todas a la vez:
 
-- Menciona a `@claude`, `@codex` (o `@chatgpt`), `@gemini` o `@equipo`. Sin mención responde la última IA que habló.
+- Menciona a `@claude`, `@codex` (o `@chatgpt`), `@antigravity` (o `@gemini`) o `@equipo`. Sin mención responde la última IA que habló.
 - **Se llaman entre sí como compañeras**: si una IA escribe `@codex: revisa la función X`, Codex recibe la petición y contesta en el mismo chat. Tras 4 intercambios seguidos entre ellas, AITeam pausa para que decidas.
 - **Contexto compartido**: todas ven la conversación. Además, cada IA reanuda su propia sesión del CLI, así que recuerda lo que hizo en turnos anteriores.
 - **Relevo automático**: si una se queda sin cuota, otra atiende la misma petición.
 - Trabajan sobre una **copia aislada** del proyecto (una rama git propia de la conversación). Con **Ver cambios** revisas el diff y, si te convence, lo fusionas.
 - `/equipo <objetivo>` lanza una tarea de equipo completa a partir de lo hecho en la conversación.
 - **Modo seguro / Control total** por conversación: en modo seguro solo editan archivos; con control total pueden ejecutar comandos, instalar dependencias y usar todas sus herramientas sin pedir permiso.
+
+### ✅ Revisar y aplicar
+- **Revisar cambios** muestra cada archivo que tocaron las IAs con su diff (e imágenes). Puedes **Aceptar**, **Rechazar** (deshace ese archivo en la copia) o **Pedir cambios** a una IA concreta sobre ese archivo.
+- **Aplicar al proyecto** fusiona el trabajo en la rama actual de tu proyecto. No toca nada si tienes cambios sin guardar; si hay conflictos, deshace la fusión y una IA puede resolverlos (**Traer cambios del proyecto**).
+
+### 🎙️ Dictado por voz
+Botón de micrófono (o **Ctrl+M**) en el chat, en el formulario de tareas y al pedir cambios. Usa el reconocimiento de voz del navegador (Edge/Chrome), sin coste.
+
+### 🎨 Apariencia
+Temas **OLED** (negro puro), **Oscuro**, **Medianoche** y **Claro**, con seis colores de acento (Ajustes → Apariencia). Emblemas propios para cada IA (no son los logos oficiales, que son marcas registradas).
 
 ### ⚡ Tareas de equipo (en paralelo)
 1. **Planificar**: una IA coordinadora divide el objetivo en subtareas con dependencias.
