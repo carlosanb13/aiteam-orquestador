@@ -1257,7 +1257,8 @@ async function selectReviewFile(file) {
     main.innerHTML = `<p class="error">${esc(err.message)}</p>`;
     return;
   }
-  const root = rv.kind === 'chats' ? state.chats.find((c) => c.id === rv.id) && state.chat?.worktree?.path : null;
+  // Carpeta desde la que se sirven las imágenes: la copia de la conversación o el resultado integrado de la tarea.
+  const root = rv.kind === 'chats' ? state.chat?.worktree?.path : state.current?.id === rv.id ? state.current.integration?.worktree : null;
   const preview = isImage(file) && f.status !== 'D' && root ? `<div class="img-preview checker rv-img"><img src="${imgUrl(root, file)}" alt="" data-zoom="${imgUrl(root, file)}" data-name="${esc(file)}" /></div>` : '';
   const agents = rv.kind === 'chats' ? (state.chat?.agents ?? []) : [];
   main.innerHTML = `
