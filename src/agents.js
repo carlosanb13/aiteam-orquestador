@@ -267,10 +267,22 @@ async function mockInvoke(agentId, { prompt, cwd, mode, onEvent }) {
  * mode: "read" (solo lectura) | "write" (puede editar en `cwd`).
  * Devuelve { ok, text, error, sessionId, durationMs }.
  */
+// Cortes de red momentáneos: merecen un reintento con la misma IA antes de dar la tarea por fallida.
+const NETWORK_ERROR =
+  /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|EPIPE|wsarecv|wsasend|socket hang up|fetch failed|network (error|is unreachable)|connection attempt failed|failed to respond|connection (was )?(reset|closed|refused)|TLS handshake timeout|\b50[234]\b|service unavailable|overloaded/i;
+const NETWORK_RETRY_DELAY_MS = 8000;
+
+export const isNetworkError = (error) => NETWORK_ERROR.test(String(error ?? '')) && !/usage limit|rate.?limit|quota/i.test(String(error ?? ''));
+
 export async function invokeAgent(agentId, options) {
-  const res = await invokeOnce(agentId, options);
+  let res = await invokeOnce(agentId, options);
+  if (!res.ok && !res.cancelled && isNetworkError(res.error)) {
+    options.onEvent?.(`↻ Error de red (${res.error.slice(0, 80)}…); se reintenta en ${NETWORK_RETRY_DELAY_MS / 1000} s.`);
+    await new Promise((r) => setTimeout(r, NETWORK_RETRY_DELAY_MS));
+    res = { ...(await invokeOnce(agentId, options)), networkRetried: true };
+  }
   // Si no se pudo reanudar la sesión (borrada, caducada...), se empieza una nueva con todo el contexto.
-  if (!res.ok && options.session?.resume && !res.cancelled && !/usage limit|rate.?limit|quota/i.test(res.error ?? '')) {
+  if (!res.ok && options.session?.resume && !res.cancelled && !/usage limit|rate.?limit|quota/i.test(res.error ?? '') && !isNetworkError(res.error)) {
     options.onEvent?.('↻ No se pudo reanudar la sesión; se abre una nueva.');
     const fresh = await invokeOnce(agentId, { ...options, prompt: options.fallbackPrompt ?? options.prompt, session: { id: agentId === 'claude' ? crypto.randomUUID() : null, resume: false } });
     return { ...fresh, sessionReset: true };

@@ -246,7 +246,8 @@ function renderRun() {
           ${t.dependsOn.length ? `<div class="desc">Depende de: ${t.dependsOn.map(esc).join(', ')}</div>` : ''}
           ${t.reassignedFrom?.length ? `<div class="desc">${icon('relay', 12)} Reasignada (antes: ${t.reassignedFrom.map((a) => esc(agentInfo(a).name)).join(', ')})</div>` : ''}
           ${t.summary ? `<div class="summary">${esc(t.summary)}</div>` : ''}
-          ${t.error ? `<div class="summary error">${esc(t.error)}</div>` : ''}
+          ${(t.attempts ?? []).length && !['failed', 'skipped'].includes(t.status) ? `<details class="attempts"><summary>${icon('relay', 12)} ${t.attempts.length} intento(s) anterior(es)</summary>${t.attempts.map((x) => `<div class="muted small-text"><b>${esc(agentInfo(x.agent).name)}</b> · ${x.kind === 'network' ? 'error de red' : x.kind === 'quota' ? 'sin cuota' : 'error'}: ${esc(x.error)}</div>`).join('')}</details>` : ''}
+          ${t.error && ['failed', 'skipped'].includes(t.status) ? `<div class="summary error">${esc(t.error)}</div>` : ''}
         </td>
         <td><div class="bids">${bids}</div></td>
         <td>${assignee}</td>

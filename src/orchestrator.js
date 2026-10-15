@@ -4,7 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import * as G from './git.js';
 import * as P from './prompts.js';
-import { AGENTS, invokeAgent } from './agents.js';
+import { AGENTS, invokeAgent, isNetworkError } from './agents.js';
 import { DATA_DIR, loadConfig } from './config.js';
 import { killTree, runShell } from './runner.js';
 
@@ -478,9 +478,14 @@ export class Orchestrator extends EventEmitter {
     if (!res.ok) {
       await G.discardChanges(wt.path);
       task.failedBy.push(agent);
-      task.error = res.error;
-      const reason = run.exhausted[agent] ? 'se quedó sin cuota' : 'falló';
-      if (task.failedBy.length >= MAX_ATTEMPTS_PER_TASK || !this.reassign(run, task, reason)) task.status = 'failed';
+      const network = isNetworkError(res.error);
+      // Historial de intentos: la interfaz los muestra como "intento anterior" si la subtarea sigue con otra IA.
+      task.attempts = [...(task.attempts ?? []), { agent, error: short(res.error, 400), kind: run.exhausted[agent] ? 'quota' : network ? 'network' : 'error', at: new Date().toISOString() }];
+      const reason = run.exhausted[agent] ? 'se quedó sin cuota' : network ? 'tuvo un error de red' : 'falló';
+      if (task.failedBy.length >= MAX_ATTEMPTS_PER_TASK || !this.reassign(run, task, reason)) {
+        task.status = 'failed';
+        task.error = res.error;
+      }
       this.touch(run);
       return;
     }

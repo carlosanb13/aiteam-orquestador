@@ -518,3 +518,5 @@ button .i { margin-right: 2px; }
 .speech-lang select { width: auto; }
 .mic-btn.busy { animation: none; background: var(--warn); }
 .notif-row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+details.attempts { margin-top: 4px; font-size: 12px; }
+details.attempts summary { cursor: pointer; color: var(--muted); }
