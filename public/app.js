@@ -744,11 +744,13 @@ function renderChatHead() {
       </div>
       <button id="chatFiles">${icon('folder')} Archivos</button>
       <button id="chatDiff" class="primary">${icon('fileDiff')} Revisar cambios</button>
+      <button id="chatTools">Herramientas</button>
       <button class="ghost" id="chatDelete" title="Borra la conversación y su copia de trabajo (la rama se conserva)">Eliminar</button>
     </div>`;
   $('#chatStop')?.addEventListener('click', () => api('POST', `/api/chats/${chat.id}/stop`));
   $('#chatDiff').addEventListener('click', () => openReview('chats', chat.id));
   $('#chatFiles').addEventListener('click', () => openFiles(chat.worktree.path, 'copia de la conversación'));
+  $('#chatTools').addEventListener('click', openChatTools);
   $('#chatAutonomy').addEventListener('click', async (e) => {
     const value = e.target.closest('[data-mode]')?.dataset.mode;
     if (!value || value === (chat.autonomy ?? state.defaultAutonomy)) return;
@@ -790,7 +792,7 @@ function messageHtml(m) {
           })
           .join('')}</div>`
       : '',
-    meta.changed ? `<details><summary>${icon('file', 13)} Archivos cambiados</summary><pre class="output">${esc(meta.stat)}</pre></details>` : '',
+    meta.changed ? `<div class="change-callout"><span>Archivos editados en la copia de trabajo</span><button class="small primary" data-chat-review="${esc(state.chat.id)}">Ver cambios y aplicar</button></div><details><summary>${icon('file', 13)} Archivos cambiados</summary><pre class="output">${esc(meta.stat)}</pre></details>` : '',
     meta.activity?.length ? `<details><summary>Actividad (${meta.activity.length})</summary><div class="activity">${meta.activity.map((l) => `<div>${iconizeLine(l, esc)}</div>`).join('')}</div></details>` : '',
   ].join('');
   return `<div class="bubble-row agent">
@@ -809,26 +811,31 @@ function runCardHtml(run) {
   const done = run.tasks?.filter((t) => t.status === 'done').length ?? 0;
   const waiting = run.status === 'awaiting_approval';
   const ready = run.status === 'done' && run.integration;
+  const applied = ready && state.runChanges.get(run.id)?.applied;
   const failed = ['interrupted', 'failed', 'cancelled'].includes(run.status);
-  const lead = ready ? 'Resultado listo para revisar' : waiting ? 'El equipo espera tu aprobación' : failed ? 'La tarea terminó sin resultado aplicable' : 'El equipo está trabajando';
+  const lead = applied ? 'Cambios aplicados al proyecto' : ready ? 'Resultado listo para revisar' : waiting ? 'El equipo espera tu aprobación' : failed ? 'La tarea terminó sin resultado aplicable' : 'El equipo está trabajando';
   const explain = ready
-    ? `Completó ${done} de ${total} subtareas. Sus cambios están guardados y pendientes de aplicar.`
+    ? applied ? `Completó ${done} de ${total} subtareas. Los cambios ya están en tu proyecto.` : `Completó ${done} de ${total} subtareas. Revisa qué entregó antes de aplicar los cambios.`
     : run.status === 'interrupted'
       ? 'La app se detuvo durante el trabajo. No se integraron ni aplicaron los cambios parciales.'
       : failed ? (run.error || 'No se generó un resultado para aplicar.')
         : total ? `${done} de ${total} subtareas completadas. ${run.phase ?? ''}` : (run.phase ?? 'Organizando el trabajo…');
   const summaries = ready ? run.tasks?.filter((t) => t.status === 'done' && t.summary).map((t) => `<li><b>${esc(t.title)}</b>: ${esc(t.summary)}</li>`).join('') : '';
+  const delivered = ready ? run.tasks?.filter((t) => t.status === 'done' && t.summary).map((t) => t.title) ?? [] : [];
+  const undocumented = ready ? run.tasks?.filter((t) => t.status === 'done' && !t.summary).length ?? 0 : 0;
   const files = state.runChanges.get(run.id)?.files ?? [];
   const previewFiles = files.filter((f) => f.status !== 'D' && isImage(f.file))
     .sort((a, b) => Number(/candidatos?\//i.test(a.file)) - Number(/candidatos?\//i.test(b.file)))
     .slice(0, 3);
   return `<div class="run-card-top"><span class="run-card-kicker">TRABAJO EN EQUIPO</span>${badge(STATUS[run.status] ?? [run.status, ''])}</div>
     <h3>${esc(lead)}</h3><p>${esc(explain)}</p>
+    ${ready && delivered.length ? `<p class="run-deliveries"><b>Entregas:</b> ${esc(delivered.slice(0, 3).join(' · '))}${delivered.length > 3 ? ` · y ${delivered.length - 3} más` : ''}</p>` : ''}
+    ${undocumented ? `<p class="muted small-text">${undocumented} subtarea(s) marcadas como terminadas sin entrega descrita.</p>` : ''}
     ${ready && files.length ? `<p class="muted small-text">${files.length} archivo(s) modificados</p>` : ''}
     ${previewFiles.length && run.integration?.worktree ? `<div class="run-previews">${previewFiles.map((f) => `<img src="${imgUrl(run.integration.worktree, f.file, run.id)}" alt="${esc(f.file)}" loading="lazy" data-zoom="${imgUrl(run.integration.worktree, f.file, run.id)}" data-name="${esc(f.file)}" /></div>`).join('')}</div>` : ''}
-    ${summaries ? `<details><summary>Qué hizo el equipo</summary><ul>${summaries}</ul></details>` : ''}
+    ${summaries ? `<details><summary>Ver detalles de las entregas</summary><ul>${summaries}</ul></details>` : ''}
     <div class="actions">
-      ${ready ? `<button class="primary small" data-run-review="${esc(run.id)}">Ver resultado y aplicar</button>` : ''}
+      ${ready && !applied ? `<button class="primary small" data-run-review="${esc(run.id)}">Ver resultado y aplicar</button>` : ''}
       ${waiting ? `<button class="primary small" data-open-run="${esc(run.id)}">Revisar reparto</button>` : ''}
       ${failed ? `<button class="small" data-run-retry="${esc(run.id)}">Volver a intentar</button>` : ''}
       <button class="small ghost" data-open-run="${esc(run.id)}">Detalles técnicos</button>
@@ -878,12 +885,94 @@ function renderChat(forceScroll = false) {
 }
 
 document.addEventListener('click', (e) => {
+  const chatReview = e.target.closest('[data-chat-review]');
+  if (chatReview) return openReview('chats', chatReview.dataset.chatReview);
   const review = e.target.closest('[data-run-review]');
   if (review) return openReview('runs', review.dataset.runReview);
   const retry = e.target.closest('[data-run-retry]');
   if (retry) return retryTeamRun(state.runDetails.get(retry.dataset.runRetry));
   const details = e.target.closest('[data-open-run]');
   if (details) return openRun(details.dataset.openRun);
+});
+
+// Las utilidades avanzadas quedan en una sola vista opcional de la conversación.
+const chatToolsDlg = document.createElement('dialog');
+chatToolsDlg.className = 'chat-tools-dlg';
+chatToolsDlg.innerHTML = `<div class="dialog-head"><div><h2>Herramientas de la conversación</h2><p class="muted small-text">Comandos, terminal y versiones de esta copia de trabajo</p></div><button class="ghost" data-close>Cerrar</button></div><div id="chatToolsBody"></div>`;
+document.body.append(chatToolsDlg);
+chatToolsDlg.querySelector('[data-close]').addEventListener('click', () => chatToolsDlg.close());
+let chatToolsTab = 'commands';
+let chatToolsId = null;
+
+async function openChatTools() {
+  chatToolsId = state.chat.id;
+  chatToolsDlg.showModal();
+  await renderChatTools();
+}
+
+async function renderChatTools() {
+  const body = $('#chatToolsBody');
+  if (!body || !chatToolsDlg.open) return;
+  const id = chatToolsId;
+  body.innerHTML = `<div class="seg tools-tabs">${[['commands', 'Comandos'], ['terminal', 'Terminal'], ['snapshots', 'Versiones']].map(([key, label]) => `<button data-tools-tab="${key}" class="${chatToolsTab === key ? 'on' : ''}">${label}</button>`).join('')}</div><div id="toolsContent" class="tools-content"><p class="muted">Cargando…</p></div>`;
+  try {
+    let html = '';
+    if (chatToolsTab === 'commands') {
+      const data = await api('GET', `/api/chats/${id}/commands`);
+      html = `<h3>Modo de trabajo</h3><p class="muted small-text">Planificar permite discutir un enfoque; Construir permite editar archivos.</p><div class="seg">${[['plan', 'Planificar'], ['build', 'Construir']].map(([key, label]) => `<button data-set-mode="${key}" class="${data.mode === key ? 'on' : ''}">${label}</button>`).join('')}</div><h3>Comandos</h3><p class="muted small-text">Pulsa uno para colocarlo en el mensaje; puedes añadir detalles antes de enviarlo.</p>${[...(data.builtin ?? []), ...(data.commands ?? [])].map((c) => `<button class="tool-command" data-insert-command="/${esc(c.name)}"><b>/${esc(c.name)}</b><span class="muted small-text">${esc(c.description ?? '')}</span></button>`).join('') || '<p class="muted">No hay comandos disponibles.</p>'}`;
+    } else if (chatToolsTab === 'terminal') {
+      const data = await api('GET', `/api/chats/${id}/terminal`);
+      html = `<h3>Terminal de la conversación</h3><p class="muted small-text">Los comandos se ejecutan en la copia de trabajo de esta conversación.</p><form id="toolsTerminalForm" class="tools-terminal-form"><input name="command" required placeholder="Escribe un comando…" autocomplete="off"><button class="primary">Ejecutar</button></form><div class="tools-terminal-history">${(data.commands ?? []).slice().reverse().map((c) => `<div class="terminal-entry"><div class="terminal-entry-head"><code>${esc(c.command)}</code> ${badge([c.status ?? 'en curso', c.status === 'running' ? 'run' : c.status === 'failed' ? 'err' : 'ok'])}</div>${c.stdout || c.stderr ? `<pre class="output">${esc([c.stdout, c.stderr].filter(Boolean).join('\n').slice(-12000))}</pre>` : ''}</div>`).join('') || '<p class="muted">Todavía no se han ejecutado comandos.</p>'}</div>`;
+    } else {
+      const data = await api('GET', `/api/chats/${id}/snapshots`);
+      html = `<h3>Versiones de la copia de trabajo</h3><p class="muted small-text">Cada versión guarda los archivos editados durante un turno. Volver a una versión cambia los archivos de esta copia.</p><div class="actions"><button data-snapshot-action="undo" ${data.cursor <= 0 ? 'disabled' : ''}>Deshacer último turno</button><button data-snapshot-action="redo" ${data.cursor >= data.turns.length ? 'disabled' : ''}>Rehacer turno</button></div><div class="tools-snapshots">${(data.turns ?? []).map((t, i) => `<div class="snapshot-entry"><div><b>Turno ${i + 1}</b> ${i < data.cursor ? badge(['actual', 'ok']) : ''}</div><span class="muted small-text">${esc((t.files ?? []).join(', ') || 'Sin archivos cambiados')}</span><button class="small" data-restore-turn="${esc(t.id)}">Volver aquí</button></div>`).join('') || '<p class="muted">Aún no hay versiones guardadas.</p>'}</div>`;
+    }
+    if (chatToolsId === id && chatToolsDlg.open) $('#toolsContent').innerHTML = html;
+  } catch (err) {
+    if (chatToolsDlg.open) $('#toolsContent').innerHTML = `<p class="error">${esc(err.message)}</p>`;
+  }
+}
+
+events.addEventListener('terminal', (e) => {
+  const event = JSON.parse(e.data);
+  if (event.kind !== 'chats' || event.ownerId !== chatToolsId || !chatToolsDlg.open || chatToolsTab !== 'terminal') return;
+  if ($('#toolsTerminalForm input')?.value) return;
+  if (event.type === 'exit' || event.type === 'stdout' || event.type === 'stderr') renderChatTools();
+});
+
+chatToolsDlg.addEventListener('click', async (e) => {
+  const tab = e.target.closest('[data-tools-tab]');
+  if (tab) { chatToolsTab = tab.dataset.toolsTab; return renderChatTools(); }
+  const command = e.target.closest('[data-insert-command]');
+  if (command) {
+    $('#chatInput').value = `${command.dataset.insertCommand} `;
+    chatToolsDlg.close();
+    $('#chatInput').focus();
+    return;
+  }
+  const mode = e.target.closest('[data-set-mode]');
+  if (mode) {
+    try { await api('PUT', `/api/chats/${chatToolsId}/mode`, { mode: mode.dataset.setMode }); await renderChatTools(); }
+    catch (err) { alert(err.message); }
+    return;
+  }
+  const action = e.target.closest('[data-snapshot-action], [data-restore-turn]');
+  if (action) {
+    const name = action.dataset.snapshotAction ?? 'restore';
+    if (!confirm('Esto cambiará los archivos en la copia de trabajo de la conversación. ¿Continuar?')) return;
+    try { await api('POST', `/api/chats/${chatToolsId}/snapshots/${name}`, name === 'restore' ? { turnId: action.dataset.restoreTurn } : undefined); await renderChatTools(); }
+    catch (err) { alert(err.message); }
+  }
+});
+
+chatToolsDlg.addEventListener('submit', async (e) => {
+  if (e.target.id !== 'toolsTerminalForm') return;
+  e.preventDefault();
+  const command = e.target.elements.command.value.trim();
+  if (!command) return;
+  e.target.querySelector('button').disabled = true;
+  try { await api('POST', `/api/chats/${chatToolsId}/terminal`, { command }); await renderChatTools(); }
+  catch (err) { alert(err.message); e.target.querySelector('button').disabled = false; }
 });
 
 async function showDiff(url) {
@@ -1483,6 +1572,10 @@ $('#rvApply').addEventListener('click', async () => {
       });
       await loadReview();
       $('#rvMain').innerHTML = '<p class="muted">Todo aplicado.</p>';
+      if (rv.kind === 'runs') {
+        state.runChanges.delete(rv.id);
+        await hydrateRunCards();
+      }
     } else if (r.reason === 'conflict' && rv.kind === 'chats') {
       $('#rvMsg').innerHTML = `<span class="error">${esc(r.error)}</span> <button class="small" id="rvFix">Que una IA lo resuelva</button>`;
       $('#rvFix').addEventListener('click', syncFromProject);

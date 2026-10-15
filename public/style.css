@@ -265,6 +265,20 @@ main:has(.chat) { padding: 0; }
 .run-card summary, .run-details > summary { cursor: pointer; font-weight: 650; }
 .run-card ul { margin: 8px 0; padding-left: 18px; }
 .run-card li { margin-bottom: 6px; }
+.change-callout { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 10px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); font-size: 12px; }
+.change-callout button { margin-left: auto; }
+.chat-tools-dlg { width: min(680px, 94vw); max-height: 85vh; overflow: auto; }
+.tools-tabs { display: flex; width: max-content; margin: 16px 0; }
+.tools-content h3 { font-size: 14px; margin: 18px 0 6px; }
+.tool-command { display: flex; align-items: baseline; gap: 12px; width: 100%; text-align: left; margin: 5px 0; }
+.tools-terminal-form { display: flex; gap: 8px; }
+.tools-terminal-form input { flex: 1; min-width: 0; }
+.tools-terminal-history, .tools-snapshots { margin-top: 16px; display: grid; gap: 8px; max-height: 45vh; overflow: auto; }
+.terminal-entry, .snapshot-entry { padding: 10px; border: 1px solid var(--border); border-radius: 8px; }
+.terminal-entry-head { display: flex; justify-content: space-between; gap: 10px; }
+.terminal-entry pre { max-height: 200px; overflow: auto; white-space: pre-wrap; }
+.snapshot-entry { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.snapshot-entry .small-text { flex: 1; min-width: 170px; }
 .run-previews { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 12px; }
 .run-previews img { width: 108px; height: 108px; object-fit: contain; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); cursor: zoom-in; }
 .run-details > summary { margin: -3px 0 7px; }

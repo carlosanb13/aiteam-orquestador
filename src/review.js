@@ -50,7 +50,8 @@ export async function listChanges(t) {
   }
   const dirty = (await G.git(t.repoPath, ['status', '--porcelain', '--untracked-files=no'])).stdout.trim().length > 0;
   const branchName = (await G.git(t.repoPath, ['rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim();
-  return { files, projectBranch: branchName, projectDirty: dirty };
+  const applied = (await G.git(t.repoPath, ['merge-base', '--is-ancestor', t.branch, 'HEAD'], { allowFail: true })).ok;
+  return { files, applied, projectBranch: branchName, projectDirty: dirty };
 }
 
 export async function fileDiff(t, file) {
