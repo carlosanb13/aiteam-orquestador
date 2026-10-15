@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AITeam</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='9' cy='16' r='5' fill='%23d97757'/><circle cx='23' cy='10' r='5' fill='%2310a37f'/><circle cx='23' cy='22' r='5' fill='%234285f4'/></svg>" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true">
+          <path d="M9 16 23 10M9 16l14 6M23 10v12" stroke="currentColor" stroke-width="1.5" opacity=".35" />
+          <circle cx="9" cy="16" r="5" fill="#d97757" />
+          <circle cx="23" cy="10" r="5" fill="#10a37f" />
+          <circle cx="23" cy="22" r="5" fill="#4285f4" />
+        </svg>
+        <span>AITeam</span>
+        <span id="mockBadge" class="badge warn" hidden>simulación</span>
+      </div>
+      <div id="agentChips" class="chips"></div>
+      <button id="settingsBtn" class="ghost" title="Ajustes">Ajustes</button>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <button id="newChatBtn" class="primary wide">+ Conversación</button>
+        <div class="sidebar-title">Conversaciones</div>
+        <ul id="chatList" class="run-list"></ul>
+        <div class="sidebar-title row-title">Tareas de equipo <button id="newRunBtn" class="small ghost" title="Nueva tarea de equipo">+</button></div>
+        <ul id="runList" class="run-list"></ul>
+      </aside>
+
+      <main id="main"></main>
+    </div>
+
+    <template id="newRunTpl">
+      <section class="panel narrow">
+        <h1>Nueva tarea para el equipo</h1>
+        <p class="muted">
+          Describe lo que quieres conseguir. Una IA lo dividirá en subtareas, el equipo negociará quién hace cada una según sus
+          puntos fuertes, trabajarán en paralelo en copias aisladas y se revisarán entre sí antes de integrar.
+        </p>
+        <form id="newRunForm" class="form">
+          <label>
+            <span>Carpeta del proyecto (repositorio git)</span>
+            <input name="repoPath" required placeholder="C:\Users\tu-usuario\proyectos\mi-app" autocomplete="off" />
+          </label>
+          <label>
+            <span>Objetivo</span>
+            <textarea name="goal" rows="5" required placeholder="Ej.: Añade un sistema de login con email y contraseña, con tests y documentación."></textarea>
+          </label>
+          <fieldset>
+            <legend>IAs que participan</legend>
+            <div class="agent-pick" data-agent-pick></div>
+          </fieldset>
+          <div class="row">
+            <label>
+              <span>Coordinadora (divide el trabajo)</span>
+              <select name="coordinator" id="coordinatorSel"></select>
+            </label>
+            <label>
+              <span>Comando de verificación <em class="muted">(opcional)</em></span>
+              <input name="testCommand" placeholder="npm test" autocomplete="off" />
+            </label>
+          </div>
+          <label class="check"><input type="checkbox" name="review" checked /> Revisión cruzada entre IAs</label>
+          <label class="check"><input type="checkbox" name="adversarial" /> Fase adversarial: una IA intenta romper el resultado (vulnerabilidades, casos límite) y otra lo corrige</label>
+          <label class="check"><input type="checkbox" name="autoApprove" /> Empezar sin esperar a que apruebe el reparto</label>
+          <p id="formError" class="error" hidden></p>
+          <button class="primary" type="submit">Empezar</button>
+        </form>
+      </section>
+    </template>
+
+    <template id="newChatTpl">
+      <section class="panel narrow">
+        <h1>Nueva conversación con el equipo</h1>
+        <p class="muted">
+          Un chat donde hablas con todas tus IAs a la vez. Menciona a <b>@claude</b>, <b>@codex</b>, <b>@gemini</b> o <b>@equipo</b>;
+          ellas también pueden pedirse cosas entre sí. Trabajan sobre una copia aislada de tu proyecto y tú decides cuándo aplicar los cambios.
+        </p>
+        <form id="newChatForm" class="form">
+          <label>
+            <span>Carpeta del proyecto (repositorio git)</span>
+            <input name="repoPath" required placeholder="C:\Users\tu-usuario\proyectos\mi-app" autocomplete="off" />
+          </label>
+          <fieldset>
+            <legend>IAs en la conversación</legend>
+            <div class="agent-pick" data-agent-pick></div>
+          </fieldset>
+          <p class="error" data-form-error hidden></p>
+          <button class="primary" type="submit">Abrir conversación</button>
+        </form>
+      </section>
+    </template>
+
+    <dialog id="diffDlg" class="wide-dialog">
+      <div class="dialog-head">
+        <h2>Cambios</h2>
+        <button class="ghost" data-close>Cerrar</button>
+      </div>
+      <div id="diffBody"></div>
+    </dialog>
+
+    <dialog id="settingsDlg">
+      <form id="settingsForm" method="dialog" class="form">
+        <h2>Ajustes</h2>
+        <label>
+          <span>Autonomía de las IAs</span>
+          <select name="autonomy">
+            <option value="edits">Solo editar archivos en su copia aislada (recomendado)</option>
+            <option value="full">Control total: también ejecutar comandos sin pedir permiso</option>
+          </select>
+        </label>
+        <div class="row">
+          <label><span>Tiempo máximo por subtarea (min)</span><input name="taskTimeoutMinutes" type="number" min="1" max="240" /></label>
+          <label><span>Rondas de corrección tras revisión</span><input name="maxFixRounds" type="number" min="0" max="5" /></label>
+        </div>
+        <div id="agentSettings"></div>
+        <div class="dialog-actions">
+          <button value="cancel" class="ghost">Cancelar</button>
+          <button id="saveSettings" value="default" class="primary">Guardar</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

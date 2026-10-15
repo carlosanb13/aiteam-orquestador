@@ -1,0 +1,7 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "aiteam-mock", "runtimeExecutable": "node", "runtimeArgs": ["server.js", "--mock"], "port": 4317 },
+    { "name": "aiteam", "runtimeExecutable": "node", "runtimeArgs": ["server.js"], "port": 4317 }
+  ]
+}

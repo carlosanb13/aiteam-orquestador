@@ -1,0 +1,282 @@
+import fs from 'node:fs';
+import crypto from 'node:crypto';
+import path from 'node:path';
+import { runProcess } from './runner.js';
+import { loadConfig } from './config.js';
+import { recordClaudeRateLimit, recordCall, touchUsage } from './usage.js';
+
+export const AGENTS = {
+  claude: { id: 'claude', name: 'Claude', vendor: 'Anthropic · Claude Code', cli: 'claude', color: '#d97757' },
+  codex: { id: 'codex', name: 'ChatGPT', vendor: 'OpenAI · Codex CLI', cli: 'codex', color: '#10a37f' },
+  gemini: { id: 'gemini', name: 'Gemini', vendor: 'Google · Gemini CLI', cli: 'gemini', color: '#4285f4' },
+};
+
+export const MOCK = process.argv.includes('--mock') || process.env.AITEAM_MOCK === '1';
+
+const short = (s, n = 160) => {
+  const one = String(s ?? '').replace(/\s+/g, ' ').trim();
+  return one.length > n ? `${one.slice(0, n)}…` : one;
+};
+
+function tail(text, n = 1500) {
+  const t = String(text ?? '').trim();
+  return t.length > n ? `…${t.slice(-n)}` : t;
+}
+
+// ---------------------------------------------------------------- Claude Code
+
+function claudeArgs(mode, autonomy, model, session) {
+  const args = ['-p', '--output-format', 'stream-json', '--verbose'];
+  // Sesión propia por conversación: la primera vez se crea con un id fijo y después se reanuda.
+  if (session?.id) args.push(session.resume ? '--resume' : '--session-id', session.id);
+  if (mode === 'write') {
+    args.push('--permission-mode', autonomy === 'full' ? 'bypassPermissions' : 'acceptEdits');
+  } else {
+    args.push('--permission-mode', 'default', '--disallowedTools', 'Edit', 'Write', 'NotebookEdit');
+  }
+  if (model) args.push('--model', model);
+  return args;
+}
+
+function claudeLine(line, state, onEvent) {
+  let ev;
+  try {
+    ev = JSON.parse(line);
+  } catch {
+    return;
+  }
+  if (ev.type === 'assistant') {
+    for (const c of ev.message?.content ?? []) {
+      if (c.type === 'text' && c.text.trim()) onEvent(short(c.text));
+      if (c.type === 'tool_use') {
+        const i = c.input ?? {};
+        onEvent(`🔧 ${c.name} ${short(i.command ?? i.file_path ?? i.pattern ?? i.description ?? '', 120)}`);
+      }
+    }
+  } else if (ev.type === 'rate_limit_event') {
+    recordClaudeRateLimit(ev.rate_limit_info);
+  } else if (ev.type === 'result') {
+    state.final = ev;
+  }
+}
+
+function claudeResult(res, state) {
+  const r = state.final;
+  if (!r) return { ok: false, error: tail(res.stderr || res.stdout) || 'Claude no devolvió resultado.' };
+  if (r.is_error) return { ok: false, error: short(r.result ?? r.subtype ?? 'error', 1500) };
+  return { ok: true, text: r.result ?? '', sessionId: r.session_id };
+}
+
+// ---------------------------------------------------------------- Codex CLI
+
+function codexArgs(mode, autonomy, model, session) {
+  const resuming = session?.resume && session.id;
+  const args = resuming ? ['exec', 'resume', '--json', '--skip-git-repo-check'] : ['exec', '--json', '--skip-git-repo-check'];
+  if (mode === 'write' && autonomy === 'full') args.push('--dangerously-bypass-approvals-and-sandbox');
+  else if (resuming) args.push('-c', `sandbox_mode=${mode === 'write' ? 'workspace-write' : 'read-only'}`);
+  else args.push('-s', mode === 'write' ? 'workspace-write' : 'read-only');
+  // El sandbox "elevated" de Windows no puede escribir en las copias de trabajo; el no elevado sí.
+  if (process.platform === 'win32') args.push('-c', 'windows.sandbox=unelevated');
+  if (model) args.push('-m', model);
+  if (resuming) args.push(session.id);
+  args.push('-');
+  return args;
+}
+
+function codexLine(line, state, onEvent) {
+  let ev;
+  try {
+    ev = JSON.parse(line);
+  } catch {
+    return;
+  }
+  const item = ev.item;
+  if (ev.type === 'item.completed' && item) {
+    if (item.type === 'agent_message') {
+      state.lastMessage = item.text;
+      onEvent(short(item.text));
+    } else if (item.type === 'command_execution') {
+      onEvent(`🔧 ${short(item.command, 120)} → ${item.exit_code ?? '?'}`);
+    } else if (item.type === 'file_change') {
+      onEvent(`✏️ ${(item.changes ?? []).map((c) => c.path).join(', ')}`);
+    } else if (item.type === 'error') {
+      onEvent(`⚠ ${short(item.message, 200)}`);
+    }
+  } else if (ev.type === 'turn.failed' || ev.type === 'error') {
+    state.error = ev.error?.message ?? ev.message ?? 'error';
+  } else if (ev.type === 'thread.started') {
+    state.sessionId = ev.thread_id;
+  }
+}
+
+function codexResult(res, state) {
+  // Un turno fallido (p. ej. límite de uso) cuenta como error aunque antes haya dicho algo.
+  if (state.error) return { ok: false, error: short(state.error, 1500) };
+  if (state.lastMessage == null) return { ok: false, error: tail(res.stderr || res.stdout) || 'Codex no devolvió respuesta.' };
+  return { ok: true, text: state.lastMessage, sessionId: state.sessionId };
+}
+
+// ---------------------------------------------------------------- Gemini CLI
+
+function geminiArgs(mode, autonomy, model, session) {
+  // El prompt va por stdin; -p vacío activa el modo headless (con shell en Windows hay que citarlo).
+  const args = ['-p', process.platform === 'win32' ? '""' : '', '--output-format', 'json', '--skip-trust'];
+  if (mode === 'write') args.push('--approval-mode', autonomy === 'full' ? 'yolo' : 'auto_edit');
+  else args.push('--approval-mode', 'default');
+  // Gemini guarda las sesiones por carpeta; cada conversación tiene la suya, así que "latest" es la correcta.
+  if (session?.resume) args.push('--resume', 'latest');
+  if (model) args.push('-m', model);
+  return args;
+}
+
+function geminiResult(res) {
+  const start = res.stdout.indexOf('{');
+  let parsed = null;
+  if (start >= 0) {
+    try {
+      parsed = JSON.parse(res.stdout.slice(start));
+    } catch {
+      parsed = null;
+    }
+  }
+  if (parsed?.error) return { ok: false, error: short(parsed.error.message ?? JSON.stringify(parsed.error), 1500) };
+  if (parsed?.response != null) return { ok: true, text: parsed.response };
+  const err = res.stderr.match(/(IneligibleTierError|Error[^\n]*)/)?.[0];
+  return { ok: false, error: short(err ?? tail(res.stderr || res.stdout) ?? 'Gemini no devolvió respuesta.', 1500) };
+}
+
+// ---------------------------------------------------------------- Simulación
+
+async function mockInvoke(agentId, { prompt, cwd, mode, onEvent }) {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  onEvent?.('(simulación) pensando…');
+  await wait(600 + Math.random() * 900);
+  const kind = prompt.match(/\[\[KIND:(\w+)\]\]/)?.[1];
+  // AITEAM_MOCK_FAIL=codex simula que esa IA se queda sin cuota al trabajar (para probar el relevo).
+  if (kind === 'task' && process.env.AITEAM_MOCK_FAIL === agentId) {
+    return { ok: false, error: "You've hit your usage limit (simulación)." };
+  }
+  let json;
+  if (kind === 'chat') {
+    if (mode === 'write' && cwd) fs.appendFileSync(path.join(cwd, `chat-demo-${agentId}.txt`), `${new Date().toISOString()}\n`);
+    await wait(500 + Math.random() * 800);
+    const hop = Number(prompt.match(/\[\[HOP:(\d+)\]\]/)?.[1] ?? 0);
+    const mate = prompt.match(/Compañeros disponibles: @(\w+)/)?.[1];
+    let text = `(simulación) Soy ${agentId}. He leído la conversación y he dejado un cambio en chat-demo-${agentId}.txt.`;
+    if (hop === 0 && mate) text += `\n\n@${mate}: revisa lo que acabo de hacer, por favor.`;
+    return { ok: true, text, sessionId: `mock-${agentId}` };
+  }
+  if (kind === 'plan') {
+    json = {
+      tasks: [
+        { id: 't1', title: 'Diseñar la estructura del módulo', description: 'Crear la estructura base.', kind: 'arquitectura', dependsOn: [] },
+        { id: 't2', title: 'Implementar la lógica principal', description: 'Escribir la lógica.', kind: 'backend', dependsOn: ['t1'] },
+        { id: 't3', title: 'Escribir la documentación', description: 'Documentar el uso.', kind: 'documentación', dependsOn: [] },
+        { id: 't4', title: 'Añadir tests', description: 'Cubrir los casos principales.', kind: 'tests', dependsOn: ['t2'] },
+      ],
+    };
+  } else if (kind === 'bid') {
+    const ids = [...prompt.matchAll(/^- id: (\S+)/gm)].map((m) => m[1]);
+    json = {
+      bids: ids.map((id) => ({ taskId: id, score: Math.round(3 + Math.random() * 7), reason: `(simulación) ${agentId} se ve capaz.` })),
+      review: { score: Math.round(4 + Math.random() * 6), reason: '(simulación)' },
+    };
+  } else if (kind === 'attack') {
+    json = {
+      summary: '(simulación) He intentado romperlo con entradas vacías y enormes.',
+      findings: [{ severity: 'media', file: 'chat-demo.txt', title: 'Entrada vacía', description: '(simulación) no se valida.', reproduce: 'Pasar ""', fix: 'Validar la entrada.' }],
+    };
+  } else if (kind === 'review') {
+    const approved = Math.random() > 0.4;
+    json = {
+      approved,
+      issues: approved ? [] : [{ severity: 'media', file: 'aiteam-demo.txt', description: '(simulación) falta un caso límite.' }],
+      summary: approved ? 'Todo correcto.' : 'Hay un detalle que corregir.',
+    };
+  } else {
+    if (mode === 'write' && cwd) {
+      fs.appendFileSync(path.join(cwd, `aiteam-demo-${agentId}.txt`), `${new Date().toISOString()} ${agentId}\n`);
+      onEvent?.(`✏️ aiteam-demo-${agentId}.txt`);
+    }
+    await wait(800 + Math.random() * 1500);
+    json = {
+      summary: `(simulación) ${agentId} completó su parte.`,
+      messages: [{ to: 'all', text: `(simulación) ${agentId}: he dejado mis cambios en aiteam-demo-${agentId}.txt` }],
+    };
+  }
+  return { ok: true, text: `Hecho.\n<<<JSON\n${JSON.stringify(json, null, 2)}\nJSON>>>` };
+}
+
+// ---------------------------------------------------------------- API pública
+
+/**
+ * Invoca una IA en modo no interactivo.
+ * mode: "read" (solo lectura) | "write" (puede editar en `cwd`).
+ * Devuelve { ok, text, error, sessionId, durationMs }.
+ */
+export async function invokeAgent(agentId, options) {
+  const res = await invokeOnce(agentId, options);
+  // Si no se pudo reanudar la sesión (borrada, caducada...), se empieza una nueva con todo el contexto.
+  if (!res.ok && options.session?.resume && !res.cancelled && !/usage limit|rate.?limit|quota/i.test(res.error ?? '')) {
+    options.onEvent?.('↻ No se pudo reanudar la sesión; se abre una nueva.');
+    const fresh = await invokeOnce(agentId, { ...options, prompt: options.fallbackPrompt ?? options.prompt, session: { id: agentId === 'claude' ? crypto.randomUUID() : null, resume: false } });
+    return { ...fresh, sessionReset: true };
+  }
+  return res;
+}
+
+async function invokeOnce(agentId, { prompt, cwd, mode = 'read', onEvent, onSpawn, timeoutMs, session, model: modelOverride, autonomy: autonomyOverride }) {
+  const started = Date.now();
+  if (MOCK) return { ...(await mockInvoke(agentId, { prompt, cwd, mode, onEvent })), durationMs: Date.now() - started };
+
+  const config = loadConfig();
+  const agentCfg = config.agents[agentId] ?? {};
+  const autonomy = autonomyOverride ?? config.autonomy;
+  const model = modelOverride ?? agentCfg.model?.trim();
+  const timeout = timeoutMs ?? config.taskTimeoutMinutes * 60_000;
+  const state = {};
+  const emit = (msg) => onEvent?.(msg);
+
+  let args;
+  let onLine;
+  if (agentId === 'claude') {
+    args = claudeArgs(mode, autonomy, model, session);
+    onLine = (l) => claudeLine(l, state, emit);
+  } else if (agentId === 'codex') {
+    args = codexArgs(mode, autonomy, model, session);
+    onLine = (l) => codexLine(l, state, emit);
+  } else if (agentId === 'gemini') {
+    args = geminiArgs(mode, autonomy, model, session);
+  } else {
+    throw new Error(`IA desconocida: ${agentId}`);
+  }
+
+  recordCall(agentId);
+  const res = await runProcess(AGENTS[agentId].cli, args, { cwd, input: prompt, timeoutMs: timeout, onLine, onSpawn });
+  if (agentId === 'codex') touchUsage(); // Codex acaba de escribir su estado de límites en sus registros
+  const durationMs = Date.now() - started;
+  if (res.cancelled) return { ok: false, cancelled: true, error: 'Cancelado.', durationMs };
+  if (res.timedOut) return { ok: false, error: `Tiempo agotado (${Math.round(timeout / 60_000)} min).`, durationMs };
+
+  let out;
+  if (agentId === 'claude') out = claudeResult(res, state);
+  else if (agentId === 'codex') out = codexResult(res, state);
+  else out = geminiResult(res);
+  return { ...out, durationMs };
+}
+
+/** Comprueba si el CLI está instalado y, opcionalmente, si responde (consume un poco de cuota). */
+export async function checkAgent(agentId, { live = false } = {}) {
+  if (MOCK) return { installed: true, version: 'simulación', working: live ? true : null };
+  const res = await runProcess(AGENTS[agentId].cli, ['--version'], { timeoutMs: 20_000 });
+  const installed = res.code === 0;
+  const version = installed ? res.stdout.trim().split('\n')[0] : null;
+  if (!installed || !live) return { installed, version, working: null };
+  const probe = await invokeAgent(agentId, {
+    prompt: 'Responde únicamente con la palabra OK.',
+    cwd: process.cwd(),
+    mode: 'read',
+    timeoutMs: 120_000,
+  });
+  return { installed, version, working: probe.ok, error: probe.ok ? undefined : probe.error };
+}

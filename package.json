@@ -1,0 +1,14 @@
+{
+  "name": "aiteam",
+  "version": "0.1.0",
+  "description": "AITeam varias IAs (Claude Code, Codex, Gemini CLI) para que se repartan tareas, trabajen en paralelo y se revisen entre sí.",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "mock": "node server.js --mock"
+  }
+}
