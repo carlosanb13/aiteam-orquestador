@@ -10,6 +10,8 @@ const state = {
   current: null, // run completo
   logs: [],
   view: 'new',
+  runDetails: new Map(),
+  runChanges: new Map(),
 };
 
 const STATUS = {
@@ -229,6 +231,19 @@ async function openRun(id) {
   renderRun();
 }
 
+async function retryTeamRun(run) {
+  if (!run?.id) return;
+  if (!confirm('Se iniciará un nuevo intento con el mismo objetivo. El trabajo parcial anterior quedará guardado. ¿Continuar?')) return;
+  try {
+    const next = await api('POST', `/api/runs/${run.id}/retry`);
+    await loadRuns();
+    if (next.chatId) {
+      await loadChats();
+      await openChat(next.chatId);
+    } else await openRun(next.id);
+  } catch (err) { alert(err.message); }
+}
+
 function stepClass(run, key) {
   const order = STEPS.map((s) => s[0]);
   const status = run.status;
@@ -247,6 +262,7 @@ function stepClass(run, key) {
 function renderRun() {
   const run = state.current;
   if (!run) return;
+  const openSections = new Set([...document.querySelectorAll('#main details.run-details[open]')].map((d) => d.dataset.section));
   const awaiting = run.status === 'awaiting_approval';
   const active = ['planning', 'bidding', 'running', 'reviewing', 'integrating', 'attacking', 'testing', 'awaiting_approval'].includes(run.status);
   const team = run.activeAgents?.length ? run.activeAgents : run.agents;
@@ -331,10 +347,9 @@ function renderRun() {
   const result =
     run.status === 'done' && integ
       ? `<section class="panel">
-        <h3>Resultado</h3>
-        <p>Todo el trabajo integrado está en la rama <code>${esc(integ.branch)}</code>. <button class="primary small" id="runDiff">Revisar y aplicar</button> O, si prefieres hacerlo a mano:</p>
-        <div class="copy-row"><code>cd "${esc(run.repoPath)}" &amp;&amp; git diff ${esc(run.baseBranch)}...${esc(integ.branch)}</code><button class="small" data-copy>Copiar</button></div>
-        <div class="copy-row"><code>cd "${esc(run.repoPath)}" &amp;&amp; git merge ${esc(integ.branch)}</code><button class="small" data-copy>Copiar</button></div>
+        <h3>Resultado listo para revisar</h3>
+        <p>El equipo terminó e integró sus cambios. Todavía no están aplicados a tu proyecto.</p>
+        <button class="primary" id="runDiff">Ver resultado y aplicar</button>
         <p class="muted">Integrado: ${integ.merged.map((a) => esc(agentInfo(a).name)).join(', ') || 'nada'}${
           integ.unmerged.length ? ` · <span class="error">Sin integrar (conflictos): ${integ.unmerged.map((a) => esc(agentInfo(a).name)).join(', ')}</span>` : ''
         }</p>
@@ -345,7 +360,9 @@ function renderRun() {
             : ''
         }
       </section>`
-      : '';
+      : run.status === 'interrupted'
+        ? `<section class="panel run-outcome"><h3>Sin resultado aplicado</h3><p>La app se detuvo durante el trabajo. Las copias parciales siguen guardadas, pero no hay un resultado integrado para aplicar.</p><button id="retryRun" class="primary">Volver a intentar</button></section>`
+        : '';
 
   $('#main').innerHTML = `
     <section class="panel">
@@ -370,17 +387,18 @@ function renderRun() {
     ${result}
     ${
       run.tasks.length
-        ? `<section class="panel"><h3>Plan y reparto</h3>
+        ? `<${awaiting ? 'section' : 'details'} class="panel run-details" data-section="plan">${awaiting ? '<h3>Plan y reparto</h3>' : '<summary>Plan y reparto</summary>'}
           ${awaiting ? '<p class="muted">Cada barra es la nota que cada IA se puso para esa subtarea. Puedes cambiar el responsable antes de aprobar.</p>' : ''}
           <table><thead><tr><th>ID</th><th>Subtarea</th><th>Valoraciones</th><th>Responsable</th><th>Estado</th></tr></thead>
-          <tbody>${tasksRows}</tbody></table></section>`
+          <tbody>${tasksRows}</tbody></table></${awaiting ? 'section' : 'details'}>`
         : ''
     }
-    <section class="panel"><h3>Actividad en vivo</h3><div class="lanes">${lanes}</div></section>
-    <section class="panel"><h3>Tablero del equipo</h3><div class="board">${board}</div></section>
-    ${reviews ? `<section class="panel"><h3>Revisiones cruzadas</h3>${reviews}</section>` : ''}
-    ${run.attack ? attackHtml(run.attack) : ''}
+    <details class="panel run-details" data-section="technical"><summary>Detalles técnicos del equipo</summary><h3>Actividad</h3><div class="lanes">${lanes}</div><h3>Mensajes entre IAs</h3><div class="board">${board}</div></details>
+    ${reviews ? `<details class="panel run-details" data-section="reviews"><summary>Revisiones cruzadas</summary>${reviews}</details>` : ''}
+    ${run.attack ? `<details class="panel run-details" data-section="attack"><summary>Pruebas adversariales</summary>${attackHtml(run.attack)}</details>` : ''}
   `;
+
+  for (const section of document.querySelectorAll('#main details.run-details')) section.open = openSections.has(section.dataset.section);
 
   for (const entry of state.logs) appendLog(entry, false);
   for (const el of document.querySelectorAll('.lane-log')) el.scrollTop = el.scrollHeight;
@@ -397,6 +415,7 @@ function renderRun() {
     }
   });
   $('#runDiff')?.addEventListener('click', () => openReview('runs', run.id));
+  $('#retryRun')?.addEventListener('click', () => retryTeamRun(run));
   $('#runFiles')?.addEventListener('click', () =>
     run.integration?.worktree && !run.cleaned
       ? openFiles(run.integration.worktree, 'resultado integrado')
@@ -460,11 +479,14 @@ events.addEventListener('open', () => {
 let runRenderQueued = false;
 events.addEventListener('run', (e) => {
   const run = JSON.parse(e.data);
+  state.runDetails.set(run.id, run);
   const idx = state.runs.findIndex((r) => r.id === run.id);
-  const summary = { id: run.id, goal: run.goal, status: run.status, createdAt: run.createdAt, agents: run.agents, repoPath: run.repoPath };
+  const summary = { id: run.id, goal: run.goal, status: run.status, createdAt: run.createdAt, agents: run.agents, repoPath: run.repoPath, baseBranch: run.baseBranch };
   if (idx >= 0) state.runs[idx] = summary;
   else state.runs.unshift(summary);
   renderRunList();
+  const card = document.querySelector(`[data-run-card="${run.id}"]`);
+  if (card) { card.innerHTML = runCardHtml(run); hydrateRunCards(); }
   if (state.current?.id === run.id) {
     state.current = run;
     // Agrupa ráfagas de actualizaciones en un solo repintado; respeta un <select> abierto.
@@ -724,8 +746,8 @@ function renderChatHead() {
 
 function messageHtml(m) {
   if (m.from === 'system') {
-    const run = m.meta?.runId ? ` <a href="#" data-open-run="${m.meta.runId}">Ver la tarea de equipo →</a>` : '';
-    return `<div class="sys ${m.kind === 'error' ? 'error' : ''}">${esc(m.text)}${run}</div>`;
+    if (m.meta?.runId) return `<div class="run-card" data-run-card="${esc(m.meta.runId)}">${runCardHtml(state.runDetails.get(m.meta.runId) ?? state.runs.find((r) => r.id === m.meta.runId))}</div>`;
+    return `<div class="sys ${m.kind === 'error' ? 'error' : ''}">${esc(m.text)}</div>`;
   }
   if (m.from === 'user') {
     return `<div class="bubble-row user"><div class="bubble">${md(m.text)}<div class="when">${fmtTime(m.ts)}</div></div><div class="avatar">${userAvatar(34)}</div></div>`;
@@ -756,6 +778,54 @@ function messageHtml(m) {
   </div>`;
 }
 
+function runCardHtml(run) {
+  if (!run) return '<span class="muted">Cargando resultado del equipo…</span>';
+  const total = run.tasks?.length ?? 0;
+  const done = run.tasks?.filter((t) => t.status === 'done').length ?? 0;
+  const waiting = run.status === 'awaiting_approval';
+  const ready = run.status === 'done' && run.integration;
+  const failed = ['interrupted', 'failed', 'cancelled'].includes(run.status);
+  const lead = ready ? 'Resultado listo para revisar' : waiting ? 'El equipo espera tu aprobación' : failed ? 'La tarea terminó sin resultado aplicable' : 'El equipo está trabajando';
+  const explain = ready
+    ? `Completó ${done} de ${total} subtareas. Sus cambios están guardados y pendientes de aplicar.`
+    : run.status === 'interrupted'
+      ? 'La app se detuvo durante el trabajo. No se integraron ni aplicaron los cambios parciales.'
+      : failed ? (run.error || 'No se generó un resultado para aplicar.')
+        : total ? `${done} de ${total} subtareas completadas. ${run.phase ?? ''}` : (run.phase ?? 'Organizando el trabajo…');
+  const summaries = ready ? run.tasks?.filter((t) => t.status === 'done' && t.summary).map((t) => `<li><b>${esc(t.title)}</b>: ${esc(t.summary)}</li>`).join('') : '';
+  const files = state.runChanges.get(run.id)?.files ?? [];
+  const previewFiles = files.filter((f) => f.status !== 'D' && isImage(f.file))
+    .sort((a, b) => Number(/candidatos?\//i.test(a.file)) - Number(/candidatos?\//i.test(b.file)))
+    .slice(0, 3);
+  return `<div class="run-card-top"><span class="run-card-kicker">TRABAJO EN EQUIPO</span>${badge(STATUS[run.status] ?? [run.status, ''])}</div>
+    <h3>${esc(lead)}</h3><p>${esc(explain)}</p>
+    ${ready && files.length ? `<p class="muted small-text">${files.length} archivo(s) modificados</p>` : ''}
+    ${previewFiles.length && run.integration?.worktree ? `<div class="run-previews">${previewFiles.map((f) => `<img src="${imgUrl(run.integration.worktree, f.file, run.id)}" alt="${esc(f.file)}" loading="lazy" data-zoom="${imgUrl(run.integration.worktree, f.file, run.id)}" data-name="${esc(f.file)}" /></div>`).join('')}</div>` : ''}
+    ${summaries ? `<details><summary>Qué hizo el equipo</summary><ul>${summaries}</ul></details>` : ''}
+    <div class="actions">
+      ${ready ? `<button class="primary small" data-run-review="${esc(run.id)}">Ver resultado y aplicar</button>` : ''}
+      ${waiting ? `<button class="primary small" data-open-run="${esc(run.id)}">Revisar reparto</button>` : ''}
+      ${failed ? `<button class="small" data-run-retry="${esc(run.id)}">Volver a intentar</button>` : ''}
+      <button class="small ghost" data-open-run="${esc(run.id)}">Detalles técnicos</button>
+    </div>`;
+}
+
+async function hydrateRunCards() {
+  const cards = [...document.querySelectorAll('[data-run-card]')];
+  await Promise.all(cards.map(async (card) => {
+    const id = card.dataset.runCard;
+    if (!state.runDetails.has(id)) {
+      try { state.runDetails.set(id, await api('GET', `/api/runs/${id}`)); }
+      catch { card.innerHTML = '<span class="error">No se pudo cargar el resultado.</span>'; return; }
+    }
+    const run = state.runDetails.get(id);
+    if (run.status === 'done' && run.integration && !state.runChanges.has(id)) {
+      try { state.runChanges.set(id, await api('GET', `/api/runs/${id}/changes`)); } catch { /* la tarjeta sigue mostrando el resultado */ }
+    }
+    if (card.isConnected) card.innerHTML = runCardHtml(state.runDetails.get(id));
+  }));
+}
+
 function liveHtml() {
   const w = state.chat.working;
   if (!w) return '';
@@ -776,14 +846,18 @@ function renderChat(forceScroll = false) {
   const box = $('#chatMsgs');
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
   box.innerHTML = state.chat.messages.map(messageHtml).join('') + liveHtml();
-  for (const link of box.querySelectorAll('[data-open-run]')) {
-    link.addEventListener('click', (e) => {
-      e.preventDefault();
-      openRun(link.dataset.openRun);
-    });
-  }
+  hydrateRunCards();
   if (forceScroll || nearBottom) box.scrollTop = box.scrollHeight;
 }
+
+document.addEventListener('click', (e) => {
+  const review = e.target.closest('[data-run-review]');
+  if (review) return openReview('runs', review.dataset.runReview);
+  const retry = e.target.closest('[data-run-retry]');
+  if (retry) return retryTeamRun(state.runDetails.get(retry.dataset.runRetry));
+  const details = e.target.closest('[data-open-run]');
+  if (details) return openRun(details.dataset.openRun);
+});
 
 async function showDiff(url) {
   const body = $('#diffBody');
@@ -882,7 +956,7 @@ function renderSidebar() {
     .map((p) => {
       const key = normPath(p.path);
       const chats = state.chats.filter((c) => normPath(c.repoPath) === key);
-      const runs = state.runs.filter((r) => normPath(r.repoPath) === key);
+      const runs = state.runs.filter((r) => normPath(r.repoPath) === key && !chats.some((c) => c.branch && c.branch === r.baseBranch));
       const open = !collapsed.has(key);
       const items = [
         ...chats.map(
@@ -972,12 +1046,9 @@ $('#selfDevBtn').addEventListener('click', async (e) => {
   const btn = e.currentTarget;
   btn.disabled = true;
   try {
-    const { root, head } = await api('GET', '/api/app');
+    const { root } = await api('GET', '/api/app');
     const candidates = state.chats.filter((c) => normPath(c.repoPath) === normPath(root));
-    for (const item of candidates) {
-      const chat = await api('GET', `/api/chats/${item.id}`);
-      if (chat.baseCommit === head) return openChat(chat.id);
-    }
+    if (candidates.length) return openChat(candidates[0].id);
     if (!usableAgents().length) throw new Error('Ninguna IA está disponible. Revisa el equipo y prueba su conexión.');
     await api('POST', '/api/projects', { path: root });
     await loadProjects();
