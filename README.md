@@ -68,6 +68,8 @@ powershell -ExecutionPolicy Bypass -File launchercrear-accesos.ps1
 
 Crea **AITeam** en el escritorio y en el menú Inicio. Al abrirlo arranca el servidor en segundo plano (sin ventanas de consola) si no está en marcha, y abre la app en su propia ventana. Para tenerlo en la barra de tareas: clic derecho sobre el acceso → *Mostrar más opciones* → *Anclar a la barra de tareas* (o, con la app abierta, clic derecho en su icono de la barra → *Anclar*). Para apagarlo: **Ajustes → Apagar**. El registro del servidor queda en `data/servidor.log`.
 
+El script asigna a los accesos el mismo identificador de aplicación que la ventana de AITeam (`MSEdge.localhost_/`), para que el icono anclado no se duplique al abrirlo. Si ya lo tenías anclado, vuelve a ejecutarlo.
+
 `launcher/crear-icono.ps1` regenera el icono.
 
 ## Uso
