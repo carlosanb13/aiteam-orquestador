@@ -25,7 +25,7 @@ Un chat único donde hablas con todas a la vez:
 - **Relevo automático**: si una se queda sin cuota, otra atiende la misma petición.
 - Trabajan sobre una **copia aislada** del proyecto (una rama git propia de la conversación). Con **Ver cambios** revisas el diff y, si te convence, lo fusionas.
 - `/equipo <objetivo>` lanza una tarea de equipo completa a partir de lo hecho en la conversación.
-- **Modo seguro / Control total** por conversación: en modo seguro solo editan archivos; con control total pueden ejecutar comandos, instalar dependencias y usar todas sus herramientas sin pedir permiso.
+- **Modo protegido / Control total** por conversación: el protegido trabaja en la copia con las restricciones propias de cada CLI; el total elimina sus comprobaciones para permitir comandos y herramientas sin pausa. Las tareas nuevas eligen su permiso por separado.
 
 ### ✅ Revisar y aplicar
 - **Revisar cambios** muestra cada archivo que tocaron las IAs con su diff (e imágenes). Puedes **Aceptar**, **Rechazar** (deshace ese archivo en la copia) o **Pedir cambios** a una IA concreta sobre ese archivo.
@@ -68,6 +68,14 @@ Barra lateral por proyectos con sus conversaciones y tareas, y un explorador de 
 Tu rama principal nunca se toca: tú decides qué fusionas.
 
 ## Utilidades inspiradas en Orca y OpenCode
+
+- **Resultados en el chat:** las respuestas largas muestran primero un resumen, archivos modificados y acciones para revisar o pedir ajustes. El texto completo y la actividad técnica quedan desplegables.
+- **Recuperación:** los turnos de chat pendientes se guardan en disco y se pueden reanudar sin perder la copia. Una tarea de equipo interrumpida puede continuar desde sus subtareas terminadas y las ramas conservadas; «Empezar de nuevo» crea un intento separado.
+- **Conexión guiada:** «+ IA» detecta CLIs habituales instalados y permite comprobar un comando antes de registrarlo. Los conectores externos siguen necesitando aceptar el mensaje por stdin y responder por stdout; detectar una instalación no garantiza que sea compatible.
+- **Extensiones por proyecto:** Herramientas → Extensiones permite activar servidores MCP HTTPS para Claude y Codex, únicamente en ese proyecto y en los turnos siguientes. Las sesiones y la autenticación pertenecen a cada CLI. Antigravity todavía no recibe estas extensiones desde AITeam.
+- **Comandos reutilizables:** Herramientas → Comandos permite crear plantillas en `.aiteam/commands/` dentro de la copia. Se incluyen en la revisión de cambios antes de aplicarse al proyecto.
+
+Los permisos de comandos individuales dentro de un CLI dependen de ese proveedor. AITeam controla el modo protegido o total por conversación y por tarea, pero aún no intercepta cada llamada interna a herramientas para solicitar aprobación una por una.
 
 - **Bus de equipo:** cada tarea conserva hilos de mensajes entre agentes. Las preguntas admiten respuesta y tiempo límite; las puertas de decisión detienen un paso hasta elegir una opción. El tablero muestra la actividad de la tarea.
 - **Instantáneas por turno:** en una conversación puedes consultar los turnos y deshacer, rehacer o restaurar el estado de los archivos de un turno. Guarda o termina cambios pendientes antes de restaurar.

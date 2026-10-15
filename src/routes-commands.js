@@ -1,6 +1,7 @@
-import { BUILTIN_COMMANDS, DEFAULT_MODE, MODES, chatMode, listCommands, setChatMode } from './commands.js';
+import { BUILTIN_COMMANDS, DEFAULT_MODE, MODES, chatMode, createProjectCommand, listCommands, setChatMode } from './commands.js';
 import { compactionConfig } from './compaction.js';
 import { findProjectRules } from './prompts.js';
+import * as G from './git.js';
 
 /**
  * API de modos, comandos personalizados, reglas del proyecto y compactación (ver commands.js y compaction.js).
@@ -30,6 +31,14 @@ export default function commandRoutes({ chats, send, readBody }) {
         builtin: Object.entries(BUILTIN_COMMANDS).map(([name, c]) => ({ name, ...c })),
         commands: listCommands({ worktree: chat.worktree.path, repoPath: chat.repoPath }).map(publicCommand),
       });
+    }],
+    ['POST', /^\/api\/chats\/([\w-]+)\/commands$/, async (req, res, m) => {
+      const chat = chatOr404(res, m[1]);
+      if (!chat) return;
+      chats.assertIdle(chat);
+      const command = createProjectCommand(chat, await readBody(req));
+      await G.git(chat.worktree.path, ['-c', 'user.name=AITeam', '-c', 'user.email=aiteam@localhost', 'commit', '-q', '--only', '-m', `[usuario] añade comando /${command.name}`, '--', `.aiteam/commands/${command.name}.md`]);
+      send(res, 201, command);
     }],
     ['GET', /^\/api\/chats\/([\w-]+)\/mode$/, (req, res, m) => {
       const chat = chatOr404(res, m[1]);

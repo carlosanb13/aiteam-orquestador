@@ -168,6 +168,8 @@ export class Orchestrator extends EventEmitter {
     const res = await invokeAgent(agentId, {
       prompt,
       cwd,
+      repoPath: run.repoPath,
+      autonomy: run.autonomy,
       mode,
       session,
       fallbackPrompt,
@@ -312,6 +314,7 @@ export class Orchestrator extends EventEmitter {
       activeAgents: [],
       coordinator,
       testCommand: String(input.testCommand ?? '').trim(),
+      autonomy: ['edits', 'full'].includes(input.autonomy) ? input.autonomy : loadConfig().autonomy,
       autoApprove: Boolean(input.autoApprove),
       review: input.review !== false,
       adversarial: Boolean(input.adversarial),
@@ -364,6 +367,31 @@ export class Orchestrator extends EventEmitter {
     }
     for (const t of run.tasks) if (['running', 'pending', 'waiting_reply', 'escalated'].includes(t.status)) t.status = 'cancelled';
     this.setStatus(run, 'cancelled', 'Cancelado por el usuario');
+    return this.publicRun(run);
+  }
+
+  /** Continúa una tarea interrumpida conservando subtareas terminadas y ramas de los agentes. */
+  async resume(id) {
+    const run = this.runs.get(id);
+    if (!run) throw new Error('No existe esa tarea.');
+    if (run.status !== 'interrupted' || run.cleaned) throw new Error('Esta tarea no se puede reanudar.');
+    if (run.integration?.worktree && fs.existsSync(run.integration.worktree)) {
+      await G.abortMerge(run.integration.worktree);
+      await G.git(run.integration.worktree, ['reset', '--hard', run.baseCommit]);
+      await G.git(run.integration.worktree, ['clean', '-fdq']);
+    }
+    run.integration = null;
+    run.cancelled = false;
+    run.error = null;
+    for (const task of run.tasks) {
+      if (task.status !== 'done') {
+        task.status = 'pending';
+        task.error = null;
+        task.notBefore = null;
+      }
+    }
+    this.log(run, null, '↻ Se reanuda desde las subtareas terminadas y las ramas conservadas.');
+    this.wrap(run, () => run.tasks.length && run.activeAgents.length ? this.execute(run) : this.planAndBid(run));
     return this.publicRun(run);
   }
 

@@ -99,7 +99,38 @@ async function loadAgents(refresh = false) {
   renderChips();
 }
 
-$('#addAgentBtn').addEventListener('click', () => $('#addAgentDlg').showModal());
+$('#addAgentBtn').addEventListener('click', async () => {
+  $('#addAgentDlg').showModal();
+  const box = $('#agentDiscovery');
+  box.textContent = 'Buscando herramientas instaladas…';
+  try {
+    const { candidates } = await api('GET', '/api/agents/discover');
+    box.innerHTML = `<b>Detectadas en este equipo</b><div class="discovery-items">${candidates.map((item) =>
+      `<button type="button" class="small ${item.installed ? '' : 'ghost'}" data-discovered="${esc(item.command)}" data-discovered-name="${esc(item.name)}" data-discovered-id="${esc(item.id)}" ${item.installed ? '' : 'disabled'}>${esc(item.name)} ${item.installed ? '✓' : '· no instalada'}</button>`).join('')}</div><p>Las integraciones incluidas ya están conectadas. Para otras herramientas, confirma que admiten mensajes por stdin y respuestas por stdout.</p>`;
+  } catch (err) { box.textContent = `No se pudo detectar: ${err.message}`; }
+});
+$('#agentDiscovery').addEventListener('click', (e) => {
+  const pick = e.target.closest('[data-discovered]');
+  if (!pick || !pick.dataset.discovered) return;
+  if (['claude', 'codex', 'agy'].includes(pick.dataset.discovered)) {
+    $('#agentProbeResult').textContent = 'Esta IA ya está integrada. Usa «Probar» en el panel Equipo y uso para comprobar su sesión.';
+    return;
+  }
+  const form = $('#addAgentForm');
+  form.elements.name.value = pick.dataset.discoveredName;
+  form.elements.id.value = pick.dataset.discoveredId;
+  form.elements.command.value = pick.dataset.discovered;
+  $('#agentProbeResult').textContent = 'Indica los argumentos que usa este CLI para responder por stdin.';
+});
+$('#probeAgentCommand').addEventListener('click', async () => {
+  const command = $('#addAgentForm').elements.command.value.trim();
+  const label = $('#agentProbeResult');
+  label.textContent = 'Comprobando…';
+  try {
+    const result = await api('POST', '/api/agents/probe', { command });
+    label.textContent = result.installed ? `Instalado: ${result.version}` : 'No se encontró en PATH.';
+  } catch (err) { label.textContent = err.message; }
+});
 $('#cancelAddAgent').addEventListener('click', () => $('#addAgentDlg').close());
 $('#addAgentForm').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -177,6 +208,7 @@ function showNew(repo) {
   if (lastRepo) $('[name=repoPath]').value = lastRepo;
 
   $('[data-agent-pick]').innerHTML = agentPickHtml();
+  $('#newRunForm').elements.autonomy.value = state.defaultAutonomy;
   const syncCoordinator = () => {
     const chosen = [...document.querySelectorAll('[name=agents]:checked')].map((i) => i.value);
     const sel = $('#coordinatorSel');
@@ -196,6 +228,7 @@ function showNew(repo) {
       agents: f.getAll('agents'),
       coordinator: f.get('coordinator'),
       testCommand: f.get('testCommand'),
+      autonomy: f.get('autonomy'),
       review: f.get('review') === 'on',
       autoApprove: f.get('autoApprove') === 'on',
       adversarial: f.get('adversarial') === 'on',
@@ -379,7 +412,7 @@ function renderRun() {
         }
       </section>`
       : run.status === 'interrupted'
-        ? `<section class="panel run-outcome"><h3>Sin resultado aplicado</h3><p>La app se detuvo durante el trabajo. Las copias parciales siguen guardadas, pero no hay un resultado integrado para aplicar.</p><button id="retryRun" class="primary">Volver a intentar</button></section>`
+        ? `<section class="panel run-outcome"><h3>Trabajo interrumpido</h3><p>Las subtareas terminadas y sus ramas siguen guardadas. Puedes continuar desde ellas o empezar otra tarea.</p>${!run.cleaned ? '<button id="resumeRun" class="primary">Reanudar trabajo</button> ' : ''}<button id="retryRun">Empezar de nuevo</button></section>`
         : '';
 
   $('#main').innerHTML = `
@@ -439,6 +472,10 @@ function renderRun() {
   });
   $('#runDiff')?.addEventListener('click', () => openReview('runs', run.id));
   $('#retryRun')?.addEventListener('click', () => retryTeamRun(run));
+  $('#resumeRun')?.addEventListener('click', async () => {
+    try { await api('POST', `/api/runs/${run.id}/resume`); await openRun(run.id); }
+    catch (err) { alert(err.message); }
+  });
   $('#runFiles')?.addEventListener('click', () =>
     run.integration?.worktree && !run.cleaned
       ? openFiles(run.integration.worktree, 'resultado integrado')
@@ -745,7 +782,7 @@ function renderChatHead() {
     <div class="actions chat-actions">
       ${chat.working ? '<button class="danger" id="chatStop">Detener</button>' : ''}
       <div class="seg" id="chatAutonomy" title="Qué pueden hacer las IAs en esta conversación">
-        <button type="button" data-mode="edits" class="${(chat.autonomy ?? state.defaultAutonomy) !== 'full' ? 'on' : ''}" title="Solo editan archivos en la copia">${icon('lock')} Seguro</button>
+        <button type="button" data-mode="edits" class="${(chat.autonomy ?? state.defaultAutonomy) !== 'full' ? 'on' : ''}" title="Trabajan en una copia con las restricciones de su CLI">${icon('lock')} Protegido</button>
         <button type="button" data-mode="full" class="${(chat.autonomy ?? state.defaultAutonomy) === 'full' ? 'on warn-on' : ''}" title="Pueden ejecutar comandos e instalar cosas">${icon('bolt')} Control total</button>
       </div>
       <button id="chatFiles">${icon('folder')} Archivos</button>
@@ -796,6 +833,10 @@ function messageHtml(m) {
   const to = m.to?.length ? ` <span class="muted">→ ${m.to.map((t) => `<span style="color:${agentInfo(t).color}">@${esc(agentInfo(t).handle ?? t)}</span>`).join(', ')}</span>` : '';
   const meta = m.meta ?? {};
   const images = meta.changed ? messageFiles(meta).filter(isImage) : [];
+  const response = String(m.text ?? '').trim();
+  const concise = response.replace(/\s+/g, ' ').slice(0, 280);
+  const expanded = response.length > 360;
+  const fileCount = meta.files?.length ?? (meta.changed ? messageFiles(meta).length : 0);
   const extras = [
     images.length
       ? `<div class="thumbs">${images
@@ -805,15 +846,18 @@ function messageHtml(m) {
           })
           .join('')}</div>`
       : '',
-    meta.changed ? `<div class="change-callout"><span>Archivos editados en la copia de trabajo</span><button class="small primary" data-chat-review="${esc(state.chat.id)}">Ver cambios y aplicar</button></div><details><summary>${icon('file', 13)} Archivos cambiados</summary><pre class="output">${esc(meta.stat)}</pre></details>` : '',
+    meta.changed ? `<details><summary>${icon('file', 13)} Archivos cambiados</summary><pre class="output">${esc(meta.stat)}</pre></details>` : '',
     meta.activity?.length ? `<details><summary>Actividad (${meta.activity.length})</summary><div class="activity">${meta.activity.map((l) => `<div>${iconizeLine(l, esc)}</div>`).join('')}</div></details>` : '',
   ].join('');
   return `<div class="bubble-row agent">
     <div class="avatar">${emblem(m.from, 34)}</div>
     <div class="bubble" style="border-left-color:${a.color}">
       <div class="who"><b style="color:${a.color}">${esc(a.name)}</b>${to} <span class="when">${fmtTime(m.ts)}${meta.durationMs ? ` · ${Math.round(meta.durationMs / 1000)}s` : ''}</span></div>
-      <div class="text">${md(m.text)}</div>
+      <div class="reply-result"><span>RESULTADO</span>${fileCount ? `<span>${fileCount} archivo(s) modificados</span>` : ''}</div>
+      <div class="text">${expanded ? esc(concise) + '…' : md(response)}</div>
+      ${expanded ? `<details class="reply-full"><summary>Leer respuesta completa</summary><div class="text">${md(response)}</div></details>` : ''}
       ${extras}
+      <div class="reply-actions">${meta.changed ? `<button class="small primary" data-chat-review="${esc(state.chat.id)}">Ver cambios y aplicar</button>` : ''}<button class="small ghost" data-chat-adjust="${esc(m.id)}" data-adjust-agent="${esc(m.from)}">Pedir ajustes</button></div>
     </div>
   </div>`;
 }
@@ -846,7 +890,7 @@ function runCardHtml(run) {
   const explain = ready
     ? applied ? `Completó ${done} de ${total} subtareas. Los cambios ya están en tu proyecto.` : `Completó ${done} de ${total} subtareas. Revisa qué entregó antes de aplicar los cambios.`
     : run.status === 'interrupted'
-      ? 'La app se detuvo durante el trabajo. No se integraron ni aplicaron los cambios parciales.'
+      ? 'La app se detuvo durante el trabajo. Las subtareas terminadas y sus ramas siguen guardadas; puedes reanudar desde ahí.'
       : failed ? (run.error || 'No se generó un resultado para aplicar.')
         : total ? `${done} de ${total} subtareas completadas. ${run.phase ?? ''}` : (run.phase ?? 'Organizando el trabajo…');
   const summaries = ready ? run.tasks?.filter((t) => t.status === 'done' && t.summary).map((t) => `<li><b>${esc(t.title)}</b>: ${esc(t.summary)}</li>`).join('') : '';
@@ -867,7 +911,8 @@ function runCardHtml(run) {
     <div class="actions">
       ${ready && !applied ? `<button class="primary small" data-run-review="${esc(run.id)}">Ver resultado y aplicar</button>` : ''}
       ${waiting ? `<button class="primary small" data-open-run="${esc(run.id)}">Revisar reparto</button>` : ''}
-      ${failed ? `<button class="small" data-run-retry="${esc(run.id)}">Volver a intentar</button>` : ''}
+      ${run.status === 'interrupted' && !run.cleaned ? `<button class="small primary" data-run-resume="${esc(run.id)}">Reanudar trabajo</button>` : ''}
+      ${failed ? `<button class="small" data-run-retry="${esc(run.id)}">Empezar de nuevo</button>` : ''}
       <button class="small ghost" data-open-run="${esc(run.id)}">Detalles técnicos</button>
     </div>`;
 }
@@ -907,7 +952,11 @@ function renderChat(forceScroll = false) {
   renderChatHead();
   const box = $('#chatMsgs');
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
-  box.innerHTML = (state.chat.messages.length
+  const pending = state.chat.pendingTurns?.length ?? 0;
+  const recovery = pending && !state.chat.working
+    ? `<div class="recovery-banner"><div><b>Trabajo pendiente</b><span> ${pending} turno(s) quedaron guardados. Los archivos parciales siguen en la copia.</span></div><button class="small primary" data-resume-chat="${esc(state.chat.id)}">Reanudar</button></div>`
+    : '';
+  box.innerHTML = recovery + (state.chat.messages.length
     ? state.chat.messages.map(messageHtml).join('')
     : '<section class="empty empty-state"><h2>La conversación está lista</h2><p>Escribe tu objetivo abajo. Menciona a una IA por su @nombre, usa @equipo para pedir varias respuestas o /equipo para iniciar una tarea.</p></section>') + liveHtml();
   hydrateRunCards();
@@ -915,12 +964,27 @@ function renderChat(forceScroll = false) {
 }
 
 document.addEventListener('click', (e) => {
+  const adjust = e.target.closest('[data-chat-adjust]');
+  if (adjust) {
+    const input = $('#chatInput');
+    if (input) {
+      const handle = agentInfo(adjust.dataset.adjustAgent).handle ?? adjust.dataset.adjustAgent;
+      input.value = `@${handle} Ajusta tu resultado anterior: `;
+      input.dispatchEvent(new Event('input'));
+      input.focus();
+    }
+    return;
+  }
+  const resume = e.target.closest('[data-resume-chat]');
+  if (resume) return api('POST', `/api/chats/${resume.dataset.resumeChat}/resume`).catch((err) => alert(err.message));
   const chatReview = e.target.closest('[data-chat-review]');
   if (chatReview) return openReview('chats', chatReview.dataset.chatReview);
   const review = e.target.closest('[data-run-review]');
   if (review) return openReview('runs', review.dataset.runReview);
   const retry = e.target.closest('[data-run-retry]');
   if (retry) return retryTeamRun(state.runDetails.get(retry.dataset.runRetry));
+  const resumeRun = e.target.closest('[data-run-resume]');
+  if (resumeRun) return api('POST', `/api/runs/${resumeRun.dataset.runResume}/resume`).then((run) => { state.runDetails.set(run.id, run); renderChat(); }).catch((err) => alert(err.message));
   const details = e.target.closest('[data-open-run]');
   if (details) return openRun(details.dataset.openRun);
 });
@@ -975,12 +1039,15 @@ async function renderChatTools() {
   const body = $('#chatToolsBody');
   if (!body || !chatToolsDlg.open) return;
   const id = chatToolsId;
-  body.innerHTML = `<div class="seg tools-tabs">${[['commands', 'Comandos'], ['terminal', 'Terminal'], ['snapshots', 'Versiones']].map(([key, label]) => `<button data-tools-tab="${key}" class="${chatToolsTab === key ? 'on' : ''}">${label}</button>`).join('')}</div><div id="toolsContent" class="tools-content"><p class="muted">Cargando…</p></div>`;
+  body.innerHTML = `<div class="seg tools-tabs">${[['commands', 'Comandos'], ['extensions', 'Extensiones'], ['terminal', 'Terminal'], ['snapshots', 'Versiones']].map(([key, label]) => `<button data-tools-tab="${key}" class="${chatToolsTab === key ? 'on' : ''}">${label}</button>`).join('')}</div><div id="toolsContent" class="tools-content"><p class="muted">Cargando…</p></div>`;
   try {
     let html = '';
     if (chatToolsTab === 'commands') {
       const data = await api('GET', `/api/chats/${id}/commands`);
-      html = `<h3>Modo de trabajo</h3><p class="muted small-text">Planificar permite discutir un enfoque; Construir permite editar archivos.</p><div class="seg">${[['plan', 'Planificar'], ['build', 'Construir']].map(([key, label]) => `<button data-set-mode="${key}" class="${data.mode === key ? 'on' : ''}">${label}</button>`).join('')}</div><h3>Comandos</h3><p class="muted small-text">Pulsa uno para colocarlo en el mensaje; puedes añadir detalles antes de enviarlo.</p>${[...(data.builtin ?? []), ...(data.commands ?? [])].map((c) => `<button class="tool-command" data-insert-command="/${esc(c.name)}"><b>/${esc(c.name)}</b><span class="muted small-text">${esc(c.description ?? '')}</span></button>`).join('') || '<p class="muted">No hay comandos disponibles.</p>'}`;
+      html = `<h3>Modo de trabajo</h3><p class="muted small-text">Planificar permite discutir un enfoque; Construir permite editar archivos.</p><div class="seg">${[['plan', 'Planificar'], ['build', 'Construir']].map(([key, label]) => `<button data-set-mode="${key}" class="${data.mode === key ? 'on' : ''}">${label}</button>`).join('')}</div><h3>Comandos y plugins del proyecto</h3><p class="muted small-text">Pulsa uno para colocarlo en el mensaje. Las plantillas nuevas se guardan en la copia y puedes aplicarlas al proyecto tras revisarlas.</p>${[...(data.builtin ?? []), ...(data.commands ?? [])].map((c) => `<button class="tool-command" data-insert-command="/${esc(c.name)}"><b>/${esc(c.name)}</b><span class="muted small-text">${esc(c.description ?? '')}</span></button>`).join('') || '<p class="muted">No hay comandos disponibles.</p>'}<details class="command-create"><summary>Crear comando reutilizable</summary><form id="commandForm" class="form"><div class="row"><label><span>Nombre</span><input name="name" required pattern="[a-zA-Z0-9_-]+" placeholder="revisar"></label><label><span>Descripción</span><input name="description" placeholder="Revisa un archivo"></label></div><div class="row"><label><span>IA</span><select name="agent"><option value="">Automática</option>${state.chat.agents.map((a) => `<option value="${esc(a)}">${esc(agentInfo(a).name)}</option>`).join('')}</select></label><label><span>Modo</span><select name="mode"><option value="build">Construir</option><option value="plan">Planificar</option></select></label></div><label><span>Instrucciones (usa $ARGUMENTS o $1)</span><textarea name="template" rows="4" required></textarea></label><button class="primary small">Crear comando</button></form></details>`;
+    } else if (chatToolsTab === 'extensions') {
+      const data = await api('GET', `/api/chats/${id}/extensions`);
+      html = `<h3>Extensiones MCP del proyecto</h3><p class="muted small-text">Activa servidores MCP HTTPS para Claude y Codex en los siguientes turnos. Usa la sesión del CLI correspondiente; AITeam no guarda credenciales aquí.</p><div class="extension-list">${(data.extensions ?? []).map((x) => `<div class="extension-entry"><div><b>${esc(x.name)}</b> <span class="muted small-text">${esc(x.id)} · ${esc(x.agents.join(', '))}</span><div class="muted small-text">${esc(x.url)}</div></div><label class="check"><input type="checkbox" data-extension-toggle="${esc(x.id)}" ${x.enabled ? 'checked' : ''}> Activa</label><button class="small ghost" data-extension-delete="${esc(x.id)}">Quitar</button></div>`).join('') || '<p class="muted">Todavía no hay servidores MCP para este proyecto.</p>'}</div><form id="extensionForm" class="form extension-form"><h4>Añadir servidor MCP</h4><div class="row"><label><span>Nombre</span><input name="name" required placeholder="Documentación"></label><label><span>Identificador</span><input name="id" required pattern="[a-z][a-z0-9_]{1,31}" placeholder="docs"></label></div><label><span>URL HTTPS del servidor</span><input name="url" type="url" required placeholder="https://ejemplo.com/mcp"></label><div class="actions"><label class="check"><input type="checkbox" name="claude" checked> Claude</label><label class="check"><input type="checkbox" name="codex" checked> Codex</label><button class="primary small">Añadir</button></div></form>`;
     } else if (chatToolsTab === 'terminal') {
       const data = await api('GET', `/api/chats/${id}/terminal`);
       html = `<h3>Terminal de la conversación</h3><p class="muted small-text">Los comandos se ejecutan en la copia de trabajo de esta conversación.</p><form id="toolsTerminalForm" class="tools-terminal-form"><input name="command" required placeholder="Escribe un comando…" autocomplete="off"><button class="primary">Ejecutar</button></form><div class="tools-terminal-history">${(data.commands ?? []).slice().reverse().map((c) => `<div class="terminal-entry"><div class="terminal-entry-head"><code>${esc(c.command)}</code> ${badge([c.status ?? 'en curso', c.status === 'running' ? 'run' : c.status === 'failed' ? 'err' : 'ok'])}</div>${c.stdout || c.stderr ? `<pre class="output">${esc([c.stdout, c.stderr].filter(Boolean).join('\n').slice(-12000))}</pre>` : ''}</div>`).join('') || '<p class="muted">Todavía no se han ejecutado comandos.</p>'}</div>`;
@@ -1004,6 +1071,18 @@ events.addEventListener('terminal', (e) => {
 chatToolsDlg.addEventListener('click', async (e) => {
   const tab = e.target.closest('[data-tools-tab]');
   if (tab) { chatToolsTab = tab.dataset.toolsTab; return renderChatTools(); }
+  const toggle = e.target.closest('[data-extension-toggle]');
+  if (toggle) {
+    try { await api('PATCH', `/api/chats/${chatToolsId}/extensions/${toggle.dataset.extensionToggle}`, { enabled: toggle.checked }); await renderChatTools(); }
+    catch (err) { alert(err.message); toggle.checked = !toggle.checked; }
+    return;
+  }
+  const remove = e.target.closest('[data-extension-delete]');
+  if (remove) {
+    try { await api('DELETE', `/api/chats/${chatToolsId}/extensions/${remove.dataset.extensionDelete}`); await renderChatTools(); }
+    catch (err) { alert(err.message); }
+    return;
+  }
   const command = e.target.closest('[data-insert-command]');
   if (command) {
     $('#chatInput').value = `${command.dataset.insertCommand} `;
@@ -1027,6 +1106,27 @@ chatToolsDlg.addEventListener('click', async (e) => {
 });
 
 chatToolsDlg.addEventListener('submit', async (e) => {
+  if (e.target.id === 'commandForm') {
+    e.preventDefault();
+    const f = e.target;
+    try {
+      await api('POST', `/api/chats/${chatToolsId}/commands`, Object.fromEntries(new FormData(f)));
+      await renderChatTools();
+    } catch (err) { alert(err.message); }
+    return;
+  }
+  if (e.target.id === 'extensionForm') {
+    e.preventDefault();
+    const f = e.target;
+    try {
+      await api('POST', `/api/chats/${chatToolsId}/extensions`, {
+        id: f.elements.id.value, name: f.elements.name.value, url: f.elements.url.value,
+        agents: ['claude', 'codex'].filter((agent) => f.elements[agent].checked),
+      });
+      await renderChatTools();
+    } catch (err) { alert(err.message); }
+    return;
+  }
   if (e.target.id !== 'toolsTerminalForm') return;
   e.preventDefault();
   const command = e.target.elements.command.value.trim();

@@ -318,6 +318,22 @@ main:has(.chat) { padding: 0; }
 .bubble pre.code code { background: none; padding: 0; }
 .bubble details { margin-top: 6px; font-size: 12.5px; }
 .bubble summary { cursor: pointer; color: var(--muted); }
+.reply-result { display: flex; gap: 10px; align-items: center; color: var(--muted); font-size: 10px; font-weight: 750; letter-spacing: .06em; margin: 8px 0 6px; }
+.reply-result span + span { letter-spacing: 0; font-weight: 500; }
+.reply-full { margin-top: 8px; }
+.reply-full .text { margin-top: 8px; }
+.reply-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.recovery-banner { align-self: center; width: min(680px, 100%); display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--warn); border-radius: 9px; background: var(--panel-2); font-size: 12px; }
+.discovery-list { border: 1px solid var(--border); border-radius: 9px; padding: 10px; }
+.discovery-list p { margin: 8px 0 0; }
+.discovery-items { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.extension-entry { display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); padding: 8px 0; }
+.extension-entry > div { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.extension-entry .check { white-space: nowrap; }
+.extension-form { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px; }
+.command-create { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
+.command-create > summary { cursor: pointer; font-weight: 650; }
+.command-create form { margin-top: 10px; }
 .mention { font-weight: 600; }
 .activity { font-family: var(--mono); font-size: 11.5px; color: var(--muted); max-height: 220px; overflow: auto; white-space: pre-wrap; }
 .live .bubble { border-style: dashed; }

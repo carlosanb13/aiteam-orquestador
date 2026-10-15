@@ -122,7 +122,7 @@ ${teamText(chat.agents)}
 
 MODO: ${(chat.autonomy ?? loadConfig().autonomy) === 'full'
     ? 'CONTROL TOTAL. Puedes ejecutar comandos, instalar dependencias y herramientas, lanzar servidores, usar la web y tus servidores MCP sin pedir permiso. Úsalo con responsabilidad: nada destructivo fuera del proyecto sin que el usuario lo pida.'
-    : 'SEGURO. Solo puedes editar archivos; no puedes ejecutar comandos. Si necesitas instalar o ejecutar algo, dilo y pide al usuario que active "Control total".'}
+    : 'PROTEGIDO. Trabaja dentro de la copia del proyecto con los permisos del CLI; evita instalaciones y operaciones fuera del proyecto. Si necesitas acceso completo, explícalo al usuario.'}
 ${modeText(mode)}${projectRules(chat.worktree.path, agent)}
 ESPACIO DE TRABAJO: el directorio actual es una copia del proyecto del usuario${chat.repoPath ? ` (${chat.repoPath})` : ''} compartida por todo el equipo en esta conversación. Puedes leer y modificar archivos; tus cambios quedan guardados y tus compañeros los verán. El usuario decidirá después si los aplica a su proyecto.
 
@@ -153,6 +153,12 @@ export class ChatManager extends EventEmitter {
       if (!file.endsWith('.json')) continue;
       try {
         const chat = JSON.parse(fs.readFileSync(path.join(CHATS_DIR, file), 'utf8'));
+        // La cola vive en memoria, pero las peticiones pendientes sobreviven a un reinicio.
+        chat.pendingTurns ??= [];
+        if (chat.working && !chat.pendingTurns.length) {
+          const request = [...chat.messages].reverse().find((m) => m.kind === 'message' && m.from === 'user');
+          if (request) chat.pendingTurns.push({ agent: chat.working.agent, request, hop: 0 });
+        }
         chat.working = null;
         this.chats.set(chat.id, chat);
       } catch {
@@ -164,7 +170,7 @@ export class ChatManager extends EventEmitter {
   list() {
     return [...this.chats.values()]
       .sort((a, b) => (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt))
-      .map((c) => ({ id: c.id, title: c.title, createdAt: c.createdAt, updatedAt: c.updatedAt, agents: c.agents, repoPath: c.repoPath, branch: c.worktree?.branch, working: c.working, mode: chatMode(c) }));
+      .map((c) => ({ id: c.id, title: c.title, createdAt: c.createdAt, updatedAt: c.updatedAt, agents: c.agents, repoPath: c.repoPath, branch: c.worktree?.branch, working: c.working, pendingCount: c.pendingTurns?.length ?? 0, mode: chatMode(c) }));
   }
 
   get(id) {
@@ -222,6 +228,7 @@ export class ChatManager extends EventEmitter {
       exhausted: {},
       messages: [],
       working: null,
+      pendingTurns: [],
     };
     this.chats.set(id, chat);
     this.addMessage(chat, {
@@ -243,7 +250,7 @@ export class ChatManager extends EventEmitter {
         text:
           chat.autonomy === 'full'
             ? 'Control total activado: las IAs pueden ejecutar comandos, instalar dependencias y usar sus herramientas sin pedir permiso.'
-            : 'Modo seguro: las IAs solo editan archivos en la copia de esta conversación.',
+            : 'Modo protegido: las IAs trabajan en la copia con las restricciones de sus CLI.',
       });
     }
     if (typeof patch.title === 'string' && patch.title.trim()) {
@@ -307,7 +314,7 @@ export class ChatManager extends EventEmitter {
 
   async launchTeamTask(chat, goal) {
     if (!this.onTeamTask) throw new Error('No disponible.');
-    const run = await this.onTeamTask({ repoPath: chat.repoPath, goal, agents: this.available(chat), baseRef: chat.worktree.branch });
+    const run = await this.onTeamTask({ repoPath: chat.repoPath, goal, agents: this.available(chat), baseRef: chat.worktree.branch, autonomy: chat.autonomy ?? loadConfig().autonomy });
     this.addMessage(chat, {
       from: 'system',
       kind: 'notice',
@@ -316,11 +323,31 @@ export class ChatManager extends EventEmitter {
     });
   }
 
-  enqueue(chat, item) {
+  enqueue(chat, item, { restore = false, front = false } = {}) {
     if (!this.queues.has(chat.id)) this.queues.set(chat.id, { items: [], running: false, child: null });
     const q = this.queues.get(chat.id);
-    q.items.push(item);
+    if (front) q.items.unshift(item);
+    else q.items.push(item);
+    if (item.agent && !restore) {
+      chat.pendingTurns ??= [];
+      const pending = { agent: item.agent, request: item.request, hop: item.hop, relayedFrom: item.relayedFrom, mode: item.mode };
+      if (front) chat.pendingTurns.unshift(pending);
+      else chat.pendingTurns.push(pending);
+      this.save(chat);
+    }
     this.pump(chat);
+  }
+
+  resume(id) {
+    const chat = this.get(id);
+    if (!chat) throw new Error('No existe esa conversación.');
+    if (chat.working || this.queues.get(id)?.running) throw new Error('El equipo ya está trabajando.');
+    const pending = chat.pendingTurns ?? [];
+    if (!pending.length) throw new Error('No hay turnos pendientes para recuperar.');
+    const q = { items: pending.map((item) => ({ ...item })), running: false, child: null };
+    this.queues.set(id, q);
+    this.pump(chat);
+    return { resumed: pending.length };
   }
 
   stop(id) {
@@ -335,6 +362,8 @@ export class ChatManager extends EventEmitter {
         killTree(q.child);
       }
     }
+    // Detener es explícito: los turnos pendientes pueden reanudarse más tarde.
+    this.save(chat);
     return chat;
   }
 
@@ -358,7 +387,18 @@ export class ChatManager extends EventEmitter {
     try {
       while (q.items.length) {
         const item = q.items.shift();
-        await (item.run ? item.run() : this.turn(chat, item, q));
+        try {
+          await (item.run ? item.run() : this.turn(chat, item, q));
+          if (item.agent) {
+            const index = (chat.pendingTurns ?? []).findIndex((pending) => pending.agent === item.agent && pending.request?.id === item.request?.id && pending.hop === item.hop);
+            if (index >= 0) chat.pendingTurns.splice(index, 1);
+            this.save(chat);
+          }
+        } catch (err) {
+          this.addMessage(chat, { from: 'system', kind: 'error', text: `El turno se interrumpió: ${short(err.message, 300)}. Puedes reanudarlo desde esta conversación.` });
+          break;
+        }
+        if (q.stopped) break;
       }
     } finally {
       q.running = false;
@@ -431,6 +471,7 @@ export class ChatManager extends EventEmitter {
         prompt: chatPrompt(chat, agent, req, isNew ? full : delta, isNew, hop, mode),
         fallbackPrompt: chatPrompt(chat, agent, req, full, true, hop, mode),
         cwd: chat.worktree.path,
+        repoPath: chat.repoPath,
         mode: invokeMode(mode),
         autonomy: chat.autonomy ?? loadConfig().autonomy,
         session,
@@ -478,7 +519,7 @@ export class ChatManager extends EventEmitter {
       }
       if (alt) {
         this.addMessage(chat, { from: 'system', kind: 'notice', text: `${AGENTS[alt].name} se encarga en su lugar.` });
-        q.items.unshift({ agent: alt, request, hop, relayedFrom: agent, mode: modeOverride });
+        this.enqueue(chat, { agent: alt, request, hop, relayedFrom: agent, mode: modeOverride }, { front: true });
       }
       return;
     }
@@ -517,7 +558,7 @@ export class ChatManager extends EventEmitter {
         break;
       }
       // Las delegaciones heredan el modo de la petición original (p. ej. un /plan de un solo mensaje).
-      q.items.push({ agent: d.to, request: { ...reply, text: d.text, from: agent, id: reply.id }, hop: hop + 1, mode: modeOverride });
+      this.enqueue(chat, { agent: d.to, request: { ...reply, text: d.text, from: agent, id: reply.id }, hop: hop + 1, mode: modeOverride });
     }
   }
 

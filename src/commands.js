@@ -119,6 +119,25 @@ export function listCommands({ worktree, repoPath } = {}) {
   return [...found.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/** Crea un comando reutilizable en la copia; se aplica al proyecto solo tras la revisión. */
+export function createProjectCommand(chat, input) {
+  const name = String(input.name ?? '').trim().toLowerCase();
+  const description = String(input.description ?? '').trim().replace(/\r?\n/g, ' ').slice(0, 160);
+  const template = String(input.template ?? '').trim();
+  const agent = resolveAgent(input.agent);
+  const mode = String(input.mode ?? 'build').toLowerCase();
+  if (!SAFE_NAME.test(name) || BUILTIN_COMMANDS[name]) throw new Error('Nombre de comando inválido o reservado.');
+  if (!template || template.length > MAX_TEMPLATE) throw new Error('Escribe una plantilla de hasta 50 000 caracteres.');
+  if (input.agent && !agent) throw new Error('IA desconocida.');
+  if (!MODES[mode]) throw new Error('Modo desconocido.');
+  const dir = path.join(chat.worktree.path, PROJECT_COMMANDS_DIR);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${name}.md`);
+  if (fs.existsSync(file)) throw new Error('Ya existe un comando con ese nombre.');
+  fs.writeFileSync(file, `---\ndescription: ${description}\n${agent ? `agent: ${agent}\n` : ''}mode: ${mode}\n---\n${template}\n`);
+  return { name, description, agent, mode, template, source: 'project' };
+}
+
 /** Divide los argumentos como una shell sencilla: respeta "comillas" y 'comillas'. */
 export function splitArgs(input) {
   const out = [];

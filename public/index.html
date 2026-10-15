@@ -87,6 +87,7 @@
             <legend>IAs que participan</legend>
             <div class="agent-pick" data-agent-pick></div>
           </fieldset>
+          <label><span>Permisos de esta tarea</span><select name="autonomy"><option value="edits">Protegido: trabajar en copias con permisos del CLI</option><option value="full">Control total: ejecutar sin pedir permiso</option></select></label>
           <div class="row">
             <label>
               <span>Coordinadora (divide el trabajo)</span>
@@ -159,7 +160,7 @@
         <label>
           <span>Autonomía de las IAs</span>
           <select name="autonomy">
-            <option value="edits">Solo editar archivos en su copia aislada (recomendado)</option>
+            <option value="edits">Protegido: copia aislada y restricciones del CLI (recomendado)</option>
             <option value="full">Control total: también ejecutar comandos sin pedir permiso</option>
           </select>
         </label>
@@ -189,9 +190,11 @@
       <form id="addAgentForm" class="form">
         <h2>Añadir IA por CLI</h2>
         <p class="muted">Conecta una herramienta instalada en este ordenador que lea el mensaje por entrada estándar y escriba su respuesta en texto por salida estándar. Inicia sesión en su CLI antes de probarla aquí.</p>
+        <div id="agentDiscovery" class="discovery-list muted small-text">Buscando herramientas instaladas…</div>
         <label><span>Nombre visible</span><input name="name" required maxlength="48" placeholder="Mi asistente" /></label>
         <label><span>Identificador para menciones</span><input name="id" required pattern="[a-z][a-z0-9_]{1,23}" placeholder="asistente" /></label>
         <label><span>Comando instalado en PATH</span><input name="command" required placeholder="mi-cli" /></label>
+        <div class="actions"><button type="button" class="small" id="probeAgentCommand">Comprobar instalación</button><span id="agentProbeResult" class="muted small-text"></span></div>
         <label><span>Argumentos fijos, uno por línea (opcional)</span><textarea name="args" rows="2" placeholder="run"></textarea></label>
         <label><span>En qué destaca (opcional)</span><textarea name="profile" rows="2"></textarea></label>
         <p class="muted small-text">El identificador queda fijo y se usa para @menciones. El CLI se ejecutará en la copia de trabajo del proyecto; su acceso a archivos depende de la propia herramienta.</p>

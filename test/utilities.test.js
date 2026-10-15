@@ -6,7 +6,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { Bus } from '../src/bus.js';
 import * as snapshots from '../src/snapshots.js';
-import { parseFrontmatter, expandTemplate, resolveSlash } from '../src/commands.js';
+import { createProjectCommand, parseFrontmatter, expandTemplate, listCommands, resolveSlash } from '../src/commands.js';
 import { history as compactHistory } from '../src/compaction.js';
 import * as terminal from '../src/terminal.js';
 
@@ -57,6 +57,15 @@ test('comandos leen frontmatter, expanden argumentos y desconocidos quedan intac
   assert.equal(expandTemplate('A: $1; todo: $ARGUMENTS', '"dos palabras" extra'), 'A: dos palabras; todo: "dos palabras" extra');
   assert.deepEqual(resolveSlash({ worktree: { path: dir } }, '/revisa archivo hoy'), { kind: 'custom', command: 'revisa', text: 'Revisa archivo con archivo hoy', agent: 'codex', mode: 'plan' });
   assert.equal(resolveSlash({ worktree: { path: dir } }, '/aiteam_test_comando_inexistente_7f2c'), null);
+});
+
+test('un comando creado desde la app queda en la copia y se puede ejecutar', (t) => {
+  const cwd = temp(t);
+  const chat = { worktree: { path: cwd } };
+  createProjectCommand(chat, { name: 'auditar', description: 'Audita un archivo', agent: 'codex', mode: 'plan', template: 'Audita $1' });
+  assert.equal(listCommands({ worktree: cwd })[0].name, 'auditar');
+  assert.equal(resolveSlash(chat, '/auditar src/app.js').text, 'Audita src/app.js');
+  assert.throws(() => createProjectCommand(chat, { name: '../salir', template: 'x' }));
 });
 
 test('compactación supera el umbral y conserva mensajes recientes', async (t) => {

@@ -9,6 +9,8 @@ import * as G from './src/git.js';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { AGENTS, MOCK, addCustomAgent, checkAgent, invokeAgent } from './src/agents.js';
+import { discoverAgents, probeCommand } from './src/discovery.js';
+import * as Extensions from './src/extensions.js';
 import { getUsage, onUsageChange } from './src/usage.js';
 import * as Projects from './src/projects.js';
 import * as Review from './src/review.js';
@@ -70,8 +72,8 @@ orchestrator.on('run', (run) => broadcast('run', run));
 orchestrator.on('log', (entry) => broadcast('log', entry));
 
 const chats = new ChatManager({
-  onTeamTask: ({ repoPath, goal, agents, baseRef }) =>
-    orchestrator.create({ repoPath, goal, agents, baseRef, coordinator: agents[0], review: true }),
+  onTeamTask: ({ repoPath, goal, agents, baseRef, autonomy }) =>
+    orchestrator.create({ repoPath, goal, agents, baseRef, autonomy, coordinator: agents[0], review: true }),
 });
 chats.on('chat', (chat) => broadcast('chat', chat));
 chats.on('activity', (a) => broadcast('chat-activity', a));
@@ -158,6 +160,8 @@ const routes = [
   ...snapshotRoutes(chats, send, readBody),
   ...(await import('./src/routes-terminal.js')).terminalRoutes(chats, orchestrator, send, readBody, broadcast),
   ['GET', /^\/api\/agents$/, async (req, res, _m, url) => send(res, 200, { mock: MOCK, agents: await agentStatus(url.searchParams.has('refresh')) })],
+  ['GET', /^\/api\/agents\/discover$/, async (req, res) => send(res, 200, { candidates: await discoverAgents() })],
+  ['POST', /^\/api\/agents\/probe$/, async (req, res) => send(res, 200, await probeCommand((await readBody(req)).command))],
   ['POST', /^\/api\/agents$/, async (req, res) => {
     const agent = addCustomAgent(await readBody(req));
     agentCache = null;
@@ -323,11 +327,13 @@ const routes = [
       repoPath: old.repoPath, baseRef: old.baseBranch, goal: old.goal, agents: old.agents,
       coordinator: old.coordinator, review: old.review, adversarial: old.adversarial,
       testCommand: old.testCommand, autoApprove: old.autoApprove,
+      autonomy: old.autonomy,
     });
     const chat = [...chats.chats.values()].find((c) => c.worktree?.branch === old.baseBranch);
     if (chat) chats.addMessage(chat, { from: 'system', kind: 'notice', text: 'El equipo vuelve a intentar la tarea. El intento anterior sigue guardado para consulta.', meta: { runId: run.id } });
     send(res, 201, { id: run.id, chatId: chat?.id ?? null });
   }],
+  ['POST', /^\/api\/runs\/([\w-]+)\/resume$/, async (req, res, m) => send(res, 200, await orchestrator.resume(m[1]))],
   [
     'GET',
     /^\/api\/runs\/([\w-]+)$/,
@@ -363,6 +369,27 @@ const routes = [
   ['DELETE', /^\/api\/chats\/([\w-]+)$/, async (req, res, m) => send(res, 200, await chats.remove(m[1]))],
   ['POST', /^\/api\/chats\/([\w-]+)\/messages$/, async (req, res, m) => send(res, 201, chats.post(m[1], (await readBody(req)).text))],
   ['POST', /^\/api\/chats\/([\w-]+)\/stop$/, (req, res, m) => send(res, 200, { ok: Boolean(chats.stop(m[1])) })],
+  ['POST', /^\/api\/chats\/([\w-]+)\/resume$/, (req, res, m) => send(res, 200, chats.resume(m[1]))],
+  ['GET', /^\/api\/chats\/([\w-]+)\/extensions$/, (req, res, m) => {
+    const chat = chats.get(m[1]);
+    if (!chat) return send(res, 404, { error: 'No existe esa conversación.' });
+    send(res, 200, { extensions: Extensions.listExtensions(chat.repoPath) });
+  }],
+  ['POST', /^\/api\/chats\/([\w-]+)\/extensions$/, async (req, res, m) => {
+    const chat = chats.get(m[1]);
+    if (!chat) return send(res, 404, { error: 'No existe esa conversación.' });
+    send(res, 201, Extensions.saveExtension(chat.repoPath, await readBody(req)));
+  }],
+  ['PATCH', /^\/api\/chats\/([\w-]+)\/extensions\/([a-z][a-z0-9_]+)$/, async (req, res, m) => {
+    const chat = chats.get(m[1]);
+    if (!chat) return send(res, 404, { error: 'No existe esa conversación.' });
+    send(res, 200, Extensions.setExtensionEnabled(chat.repoPath, m[2], (await readBody(req)).enabled));
+  }],
+  ['DELETE', /^\/api\/chats\/([\w-]+)\/extensions\/([a-z][a-z0-9_]+)$/, (req, res, m) => {
+    const chat = chats.get(m[1]);
+    if (!chat) return send(res, 404, { error: 'No existe esa conversación.' });
+    send(res, 200, Extensions.removeExtension(chat.repoPath, m[2]));
+  }],
   ['GET', /^\/api\/chats\/([\w-]+)\/diff$/, async (req, res, m) => send(res, 200, await chats.diff(m[1]))],
   ['POST', /^\/api\/runs\/([\w-]+)\/cleanup$/, async (req, res, m) => send(res, 200, await orchestrator.cleanup(m[1]))],
   [

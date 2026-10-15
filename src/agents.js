@@ -4,6 +4,7 @@ import path from 'node:path';
 import { runProcess } from './runner.js';
 import { loadConfig, saveConfig } from './config.js';
 import { recordClaudeRateLimit, recordCall, touchUsage } from './usage.js';
+import { mcpArgs } from './extensions.js';
 
 export const AGENTS = {
   claude: {
@@ -83,7 +84,7 @@ function tail(text, n = 1500) {
 
 // ---------------------------------------------------------------- Claude Code
 
-function claudeArgs(mode, autonomy, model, session) {
+function claudeArgs(mode, autonomy, model, session, extra = []) {
   const args = ['-p', '--output-format', 'stream-json', '--verbose'];
   // Sesión propia por conversación: la primera vez se crea con un id fijo y después se reanuda.
   if (session?.id) args.push(session.resume ? '--resume' : '--session-id', session.id);
@@ -97,6 +98,7 @@ function claudeArgs(mode, autonomy, model, session) {
     args.push('--permission-mode', 'default', '--disallowedTools', 'Edit', 'Write', 'NotebookEdit');
   }
   if (model) args.push('--model', model);
+  args.push(...extra);
   return args;
 }
 
@@ -131,7 +133,7 @@ function claudeResult(res, state) {
 
 // ---------------------------------------------------------------- Codex CLI
 
-function codexArgs(mode, autonomy, model, session) {
+function codexArgs(mode, autonomy, model, session, extra = []) {
   const resuming = session?.resume && session.id;
   const args = resuming ? ['exec', 'resume', '--json', '--skip-git-repo-check'] : ['exec', '--json', '--skip-git-repo-check'];
   if (mode === 'write' && autonomy === 'full') args.push('--dangerously-bypass-approvals-and-sandbox');
@@ -140,6 +142,7 @@ function codexArgs(mode, autonomy, model, session) {
   // El sandbox "elevated" de Windows no puede escribir en las copias de trabajo; el no elevado sí.
   if (process.platform === 'win32') args.push('-c', 'windows.sandbox=unelevated');
   if (model) args.push('-m', model);
+  args.push(...extra);
   if (resuming) args.push(session.id);
   args.push('-');
   return args;
@@ -335,7 +338,7 @@ export async function invokeAgent(agentId, options) {
   return res;
 }
 
-async function invokeOnce(agentId, { prompt, cwd, mode = 'read', onEvent, onSpawn, timeoutMs, session, model: modelOverride, autonomy: autonomyOverride }) {
+async function invokeOnce(agentId, { prompt, cwd, repoPath, mode = 'read', onEvent, onSpawn, timeoutMs, session, model: modelOverride, autonomy: autonomyOverride }) {
   const started = Date.now();
   if (MOCK) return { ...(await mockInvoke(agentId, { prompt, cwd, mode, onEvent })), durationMs: Date.now() - started };
 
@@ -349,7 +352,7 @@ async function invokeOnce(agentId, { prompt, cwd, mode = 'read', onEvent, onSpaw
 
   const adapter = ADAPTERS[agentId] ?? (AGENTS[agentId]?.custom ? customAdapter : null);
   if (!adapter) throw new Error(`IA desconocida: ${agentId}`);
-  const args = adapter.args({ mode, autonomy, model, session, agent: AGENTS[agentId] });
+  const args = adapter.args({ mode, autonomy, model, session, agent: AGENTS[agentId], extra: mcpArgs(agentId, repoPath) });
   const onLine = (line) => adapter.line?.(line, state, emit);
 
   recordCall(agentId);
@@ -365,8 +368,8 @@ async function invokeOnce(agentId, { prompt, cwd, mode = 'read', onEvent, onSpaw
 }
 
 const ADAPTERS = {
-  claude: { args: ({ mode, autonomy, model, session }) => claudeArgs(mode, autonomy, model, session), line: claudeLine, result: claudeResult },
-  codex: { args: ({ mode, autonomy, model, session }) => codexArgs(mode, autonomy, model, session), line: codexLine, result: codexResult },
+  claude: { args: ({ mode, autonomy, model, session, extra }) => claudeArgs(mode, autonomy, model, session, extra), line: claudeLine, result: claudeResult },
+  codex: { args: ({ mode, autonomy, model, session, extra }) => codexArgs(mode, autonomy, model, session, extra), line: codexLine, result: codexResult },
   gemini: { args: ({ mode, autonomy, model, session }) => agyArgs(mode, autonomy, model, session), line: agyLine, result: agyResult,
     input: (prompt) => `${JSON.stringify({ event: 'user', message: { content: prompt } })}\n` },
 };
