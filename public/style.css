@@ -265,6 +265,13 @@ main:has(.chat) { padding: 0; }
 .run-card summary, .run-details > summary { cursor: pointer; font-weight: 650; }
 .run-card ul { margin: 8px 0; padding-left: 18px; }
 .run-card li { margin-bottom: 6px; }
+.team-panel h3 { margin: 0 0 10px; }
+.team-question { border: 1px solid var(--border); border-radius: 9px; background: var(--panel-2); padding: 10px 12px; margin: 10px 0; }
+.team-question p { margin: 5px 0 9px; white-space: pre-wrap; }
+.team-question input { flex: 1; min-width: 150px; }
+.team-conversation { margin-top: 10px; }
+.team-conversation > div { display: grid; gap: 7px; max-height: 280px; overflow: auto; margin-top: 8px; }
+.team-message { border-left: 2px solid var(--border); padding: 4px 9px; font-size: 12px; white-space: pre-wrap; }
 .change-callout { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 10px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); font-size: 12px; }
 .change-callout button { margin-left: auto; }
 .chat-tools-dlg { width: min(680px, 94vw); max-height: 85vh; overflow: auto; }
@@ -469,6 +476,10 @@ main { overflow-y: auto; height: 100vh; }
 button .i { margin-right: 2px; }
 .icon-btn .i, .project-actions .i, #filesClose .i, #refreshUsage .i { margin: 0; }
 .emblem { display: inline-block; flex: none; border-radius: 28%; vertical-align: middle; }
+.brand-emblem { background: var(--text); border-radius: 0; -webkit-mask-position: center; mask-position: center; -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; }
+.brand-claude { -webkit-mask-image: url('/brands/claude.svg'); mask-image: url('/brands/claude.svg'); }
+.brand-openai { -webkit-mask-image: url('/brands/openai.svg'); mask-image: url('/brands/openai.svg'); }
+.brand-antigravity { -webkit-mask-image: url('/brands/antigravity.svg'); mask-image: url('/brands/antigravity.svg'); }
 .user-emblem { display: inline-grid; place-items: center; background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
 .avatar { width: auto; height: auto; background: none; display: block; }
 .agent-tag .emblem { margin-right: 2px; }

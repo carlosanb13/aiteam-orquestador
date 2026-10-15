@@ -89,7 +89,7 @@ Tu rama principal nunca se toca: tú decides qué fusionas.
 
 Las preguntas al usuario esperan hasta cinco minutos y, al vencer, el agente continúa con su propio criterio. Las escaladas esperan hasta cinco minutos y continúan por defecto; ambos tiempos se ajustan con `bus.askTimeoutMs` y `bus.gateTimeoutMs` en la configuración. Las preguntas y decisiones se responden mediante la API del bus.
 
-Las funciones se seleccionaron con un análisis guiado por REA de Orca y OpenCode, documentado en [Orca](docs/rea/orca.md) y [OpenCode](docs/rea/opencode.md). El documento de Orca indica las comprobaciones REA que quedaron pendientes de acceso.
+Las funciones se seleccionaron a partir de la documentación disponible de Orca y OpenCode. Ahora hay comprobaciones acotadas con REA de [Orca](docs/rea/orca-real-analysis.md) y [OpenCode](docs/rea/opencode.md). El [inventario anterior](docs/rea/orca.md) conserva las hipótesis y límites de la primera revisión de Orca.
 
 
 

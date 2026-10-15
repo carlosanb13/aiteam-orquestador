@@ -230,6 +230,9 @@ async function openRun(id) {
   }
   state.logs = run.log ?? [];
   delete run.log;
+  if (run.status === 'done' && run.integration) {
+    try { state.runChanges.set(id, await api('GET', `/api/runs/${id}/changes`)); } catch { /* el resultado sigue disponible */ }
+  }
   state.current = run;
   state.chat = null;
   state.view = 'run';
@@ -358,12 +361,13 @@ function renderRun() {
     : '';
 
   const integ = run.integration;
+  const applied = Boolean(state.runChanges.get(run.id)?.applied);
   const result =
     run.status === 'done' && integ
       ? `<section class="panel">
-        <h3>Resultado listo para revisar</h3>
-        <p>El equipo terminó e integró sus cambios. Todavía no están aplicados a tu proyecto.</p>
-        <button class="primary" id="runDiff">Ver resultado y aplicar</button>
+        <h3>${applied ? 'Cambios aplicados al proyecto' : 'Resultado listo para revisar'}</h3>
+        <p>${applied ? 'El equipo terminó y los cambios ya están en tu proyecto.' : 'El equipo terminó e integró sus cambios. Revísalos para aplicarlos a tu proyecto.'}</p>
+        ${applied ? '' : '<button class="primary" id="runDiff">Ver resultado y aplicar</button>'}
         <p class="muted">Integrado: ${integ.merged.map((a) => esc(agentInfo(a).name)).join(', ') || 'nada'}${
           integ.unmerged.length ? ` · <span class="error">Sin integrar (conflictos): ${integ.unmerged.map((a) => esc(agentInfo(a).name)).join(', ')}</span>` : ''
         }</p>
@@ -400,6 +404,7 @@ function renderRun() {
       ${run.dirty ? '<p class="muted">' + icon('alert', 13) + ' El repositorio tenía cambios sin commit; las IAs trabajan sobre el último commit.</p>' : ''}
     </section>
     ${result}
+    ${(run.messages?.length || run.gates?.length) ? `<section class="panel team-panel"><h3>Colaboración del equipo</h3>${teamConversationHtml(run, 20)}</section>` : ''}
     ${
       run.tasks.length
         ? `<${awaiting ? 'section' : 'details'} class="panel run-details" data-section="plan">${awaiting ? '<h3>Plan y reparto</h3>' : '<summary>Plan y reparto</summary>'}
@@ -805,6 +810,22 @@ function messageHtml(m) {
   </div>`;
 }
 
+function teamConversationHtml(run, limit = 8) {
+  const messages = (run.messages ?? []).filter((m) => m.kind !== 'heartbeat');
+  const asks = messages.filter((m) => m.kind === 'ask' && m.to === 'user' && m.status === 'pending');
+  const gates = (run.gates ?? []).filter((g) => g.status === 'pending' && g.kind !== 'plan_approval');
+  const attention = [
+    ...asks.map((m) => `<form class="team-question" data-bus-reply="${esc(run.id)}" data-ask-id="${esc(m.id)}"><b>${esc(agentInfo(m.from).name)} te pregunta:</b><p>${esc(m.text)}</p><div class="actions"><input name="text" required placeholder="Tu respuesta…"><button class="primary small">Responder</button></div></form>`),
+    ...gates.map((g) => `<div class="team-question"><b>El equipo necesita una decisión:</b><p>${esc(g.question)}</p><div class="actions">${(g.options ?? []).map((choice) => `<button class="small" data-bus-gate="${esc(run.id)}" data-gate-id="${esc(g.id)}" data-choice="${esc(choice)}">${esc(choice)}</button>`).join('')}</div></div>`),
+  ].join('');
+  const thread = messages.slice(-limit).map((m) => {
+    const from = m.from === 'user' ? 'Tú' : m.from === 'aiteam' ? 'AITeam' : agentInfo(m.from).name;
+    const to = m.to === 'all' ? 'equipo' : m.to === 'user' ? 'ti' : agentInfo(m.to).name;
+    return `<div class="team-message"><div class="muted small-text">${esc(from)} → ${esc(to)} · ${fmtTime(m.ts)}</div><div>${esc(m.text)}</div></div>`;
+  }).join('');
+  return `${attention}${messages.length ? `<details class="team-conversation"><summary>Conversación del equipo (${messages.length} mensajes)</summary><div>${thread}</div></details>` : ''}`;
+}
+
 function runCardHtml(run) {
   if (!run) return '<span class="muted">Cargando resultado del equipo…</span>';
   const total = run.tasks?.length ?? 0;
@@ -834,6 +855,7 @@ function runCardHtml(run) {
     ${ready && files.length ? `<p class="muted small-text">${files.length} archivo(s) modificados</p>` : ''}
     ${previewFiles.length && run.integration?.worktree ? `<div class="run-previews">${previewFiles.map((f) => `<img src="${imgUrl(run.integration.worktree, f.file, run.id)}" alt="${esc(f.file)}" loading="lazy" data-zoom="${imgUrl(run.integration.worktree, f.file, run.id)}" data-name="${esc(f.file)}" /></div>`).join('')}</div>` : ''}
     ${summaries ? `<details><summary>Ver detalles de las entregas</summary><ul>${summaries}</ul></details>` : ''}
+    ${teamConversationHtml(run, 6)}
     <div class="actions">
       ${ready && !applied ? `<button class="primary small" data-run-review="${esc(run.id)}">Ver resultado y aplicar</button>` : ''}
       ${waiting ? `<button class="primary small" data-open-run="${esc(run.id)}">Revisar reparto</button>` : ''}
@@ -893,6 +915,37 @@ document.addEventListener('click', (e) => {
   if (retry) return retryTeamRun(state.runDetails.get(retry.dataset.runRetry));
   const details = e.target.closest('[data-open-run]');
   if (details) return openRun(details.dataset.openRun);
+});
+
+async function refreshTeamConversation(runId) {
+  const run = await api('GET', `/api/runs/${runId}`);
+  state.runDetails.set(runId, run);
+  if (state.current?.id === runId) { state.current = run; renderRun(); }
+  const card = document.querySelector(`[data-run-card="${runId}"]`);
+  if (card) card.innerHTML = runCardHtml(run);
+}
+
+document.addEventListener('submit', async (e) => {
+  const form = e.target.closest('[data-bus-reply]');
+  if (!form) return;
+  e.preventDefault();
+  const text = form.elements.text.value.trim();
+  if (!text) return;
+  form.querySelector('button').disabled = true;
+  try {
+    await api('POST', `/api/runs/${form.dataset.busReply}/asks/${form.dataset.askId}/reply`, { text });
+    await refreshTeamConversation(form.dataset.busReply);
+  } catch (err) { alert(err.message); form.querySelector('button').disabled = false; }
+});
+
+document.addEventListener('click', async (e) => {
+  const button = e.target.closest('[data-bus-gate]');
+  if (!button) return;
+  button.disabled = true;
+  try {
+    await api('POST', `/api/runs/${button.dataset.busGate}/gates/${button.dataset.gateId}/decide`, { choice: button.dataset.choice });
+    await refreshTeamConversation(button.dataset.busGate);
+  } catch (err) { alert(err.message); button.disabled = false; }
 });
 
 // Las utilidades avanzadas quedan en una sola vista opcional de la conversación.
@@ -1573,8 +1626,9 @@ $('#rvApply').addEventListener('click', async () => {
       await loadReview();
       $('#rvMain').innerHTML = '<p class="muted">Todo aplicado.</p>';
       if (rv.kind === 'runs') {
-        state.runChanges.delete(rv.id);
+        state.runChanges.set(rv.id, await api('GET', `/api/runs/${rv.id}/changes`));
         await hydrateRunCards();
+        if (state.current?.id === rv.id) renderRun();
       }
     } else if (r.reason === 'conflict' && rv.kind === 'chats') {
       $('#rvMsg').innerHTML = `<span class="error">${esc(r.error)}</span> <button class="small" id="rvFix">Que una IA lo resuelva</button>`;

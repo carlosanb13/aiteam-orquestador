@@ -1,5 +1,7 @@
 # Orca: inventario de utilidades y cómo aplicarlas en AITeam
 
+> Actualización del 15 de octubre de 2026: REA **sí pudo ejecutarse después**, desde esta conversación. La comprobación local y sus límites están en [orca-real-analysis.md](orca-real-analysis.md). El aviso de falta de acceso que sigue documenta únicamente la subtarea original.
+
 > Subtarea t1. Responsable: claude. Fecha: 2026-10-15.
 > Es un documento de análisis: no modifica código de la app ni copia código de Orca.
 

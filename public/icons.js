@@ -1,4 +1,4 @@
-// Iconos de línea y emblemas de AITeam (SVG propio, sin emojis).
+// Iconos de línea de AITeam y marcas de los servicios conectados.
 
 const svg = (body, size = 16, extra = '') =>
   `<svg class="i" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"${extra}>${body}</svg>`;
@@ -41,36 +41,13 @@ export function icon(name, size = 16, extra = '') {
   return svg(PATHS[name] ?? PATHS.dot, size, extra);
 }
 
-/**
- * Emblemas propios de cada IA (no son los logos oficiales, que son marcas registradas):
- * Claude, una chispa de cuatro puntas; Codex, un indicador de terminal; Antigravity, un satélite en órbita.
- */
-const EMBLEM_MARKS = {
-  claude: `<path d="M32 13c1.6 9.6 4.4 12.4 14 14-9.6 1.6-12.4 4.4-14 14-1.6-9.6-4.4-12.4-14-14 9.6-1.6 12.4-4.4 14-14z" fill="#fff"/>
-           <path d="M44 38c.7 3.4 1.6 4.3 5 5-3.4.7-4.3 1.6-5 5-.7-3.4-1.6-4.3-5-5 3.4-.7 4.3-1.6 5-5z" fill="#fff" opacity=".75"/>`,
-  codex: `<path d="M19 24l9 8-9 8" stroke="#fff" stroke-width="4.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M32 41h13" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/>`,
-  gemini: `<ellipse cx="32" cy="34" rx="18" ry="7" stroke="#fff" stroke-width="3.2" fill="none" transform="rotate(-18 32 34)" opacity=".85"/>
-           <circle cx="32" cy="34" r="7.5" fill="#fff"/>
-           <circle cx="47" cy="22" r="3.6" fill="#fff"/>`,
-};
-const EMBLEM_BG = {
-  claude: ['#e0896b', '#c4623f'],
-  codex: ['#19b88f', '#0b7d61'],
-  gemini: ['#5f9bff', '#3463d9'],
-};
-
-let gradId = 0;
+// Los SVG conservan la geometría original; CSS los presenta en blanco o negro.
+const BRAND_MARKS = { claude: 'claude', codex: 'openai', gemini: 'antigravity' };
 export function emblem(id, size = 28) {
-  const mark = EMBLEM_MARKS[id];
-  if (!mark) return `<span class="emblem fallback" style="width:${size}px;height:${size}px">${svg(PATHS.user, size * 0.6)}</span>`;
-  const [a, b] = EMBLEM_BG[id];
-  const g = `em${id}${gradId++}`;
-  return `<svg class="emblem" width="${size}" height="${size}" viewBox="0 0 64 64" aria-hidden="true">
-    <defs><linearGradient id="${g}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs>
-    <rect width="64" height="64" rx="18" fill="url(#${g})"/>${mark}</svg>`;
+  const brand = BRAND_MARKS[id];
+  if (!brand) return `<span class="emblem fallback" style="width:${size}px;height:${size}px">${svg(PATHS.user, size * 0.6)}</span>`;
+  return `<span class="emblem brand-emblem brand-${brand}" style="width:${size}px;height:${size}px" aria-hidden="true"></span>`;
 }
-
 export function userAvatar(size = 28) {
   return `<span class="emblem user-emblem" style="width:${size}px;height:${size}px">${svg(PATHS.user, Math.round(size * 0.58))}</span>`;
 }
