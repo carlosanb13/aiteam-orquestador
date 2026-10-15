@@ -112,6 +112,7 @@ function allowedRoots() {
   for (const r of orchestrator.runs.values()) {
     for (const w of Object.values(r.worktrees ?? {})) roots.push(w.path);
     if (r.integration?.worktree) roots.push(r.integration.worktree);
+    for (const previous of r.previousIntegrations ?? []) if (previous.worktree) roots.push(previous.worktree);
   }
   return roots;
 }

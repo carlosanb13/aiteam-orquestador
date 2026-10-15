@@ -375,10 +375,10 @@ export class Orchestrator extends EventEmitter {
     const run = this.runs.get(id);
     if (!run) throw new Error('No existe esa tarea.');
     if (run.status !== 'interrupted' || run.cleaned) throw new Error('Esta tarea no se puede reanudar.');
-    if (run.integration?.worktree && fs.existsSync(run.integration.worktree)) {
-      await G.abortMerge(run.integration.worktree);
-      await G.git(run.integration.worktree, ['reset', '--hard', run.baseCommit]);
-      await G.git(run.integration.worktree, ['clean', '-fdq']);
+    if (run.integration) {
+      run.previousIntegrations ??= [];
+      run.previousIntegrations.push(run.integration);
+      run.integrationRevision = (run.integrationRevision ?? 0) + 1;
     }
     run.integration = null;
     run.cancelled = false;
@@ -401,6 +401,7 @@ export class Orchestrator extends EventEmitter {
     if (ACTIVE.has(run.status)) throw new Error('Cancela la tarea antes de limpiar sus copias.');
     const paths = Object.values(run.worktrees).map((w) => w.path);
     if (run.integration?.worktree) paths.push(run.integration.worktree);
+    for (const previous of run.previousIntegrations ?? []) if (previous.worktree) paths.push(previous.worktree);
     for (const p of paths) await G.removeWorktree(run.repoPath, p);
     run.cleaned = true;
     this.log(run, null, '🧹 Copias de trabajo eliminadas (las ramas se conservan).');
@@ -761,9 +762,10 @@ export class Orchestrator extends EventEmitter {
   async integrate(run) {
     this.setStatus(run, 'integrating', 'Fusionando el trabajo de todas las IAs');
     const base = path.join(path.dirname(run.repoPath), `.aiteam-${path.basename(run.repoPath)}`, run.id);
+    const suffix = run.integrationRevision ? `-r${run.integrationRevision}` : '';
     const integration = {
-      branch: `aiteam/${run.id}/integracion`,
-      worktree: path.join(base, '_integracion'),
+      branch: `aiteam/${run.id}/integracion${suffix}`,
+      worktree: path.join(base, `_integracion${suffix}`),
       merged: [],
       unmerged: [],
       tests: null,

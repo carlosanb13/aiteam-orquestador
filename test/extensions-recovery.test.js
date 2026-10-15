@@ -41,7 +41,7 @@ test('un turno pendiente queda disponible para reanudar después de reiniciar', 
 
 test('reanudar una tarea conserva subtareas terminadas', async () => {
   const manager = new Orchestrator();
-  const run = { id: 'run-recovery', status: 'interrupted', cleaned: false, tasks: [{ id: 'a', status: 'done' }, { id: 'b', status: 'failed', error: 'corte' }], activeAgents: ['codex'], integration: null, log: [], cancelled: true, error: 'corte' };
+  const run = { id: 'run-recovery', status: 'interrupted', cleaned: false, tasks: [{ id: 'a', status: 'done' }, { id: 'b', status: 'failed', error: 'corte' }], activeAgents: ['codex'], integration: { branch: 'parcial', worktree: path.join(data, 'parcial') }, log: [], cancelled: true, error: 'corte' };
   manager.runs.set(run.id, run);
   let resumed = false;
   manager.wrap = () => { resumed = true; };
@@ -50,5 +50,7 @@ test('reanudar una tarea conserva subtareas terminadas', async () => {
   assert.equal(run.tasks[0].status, 'done');
   assert.equal(run.tasks[1].status, 'pending');
   assert.equal(run.cancelled, false);
+  assert.equal(run.previousIntegrations[0].branch, 'parcial');
+  assert.equal(run.integrationRevision, 1);
   assert.equal(resumed, true);
 });
