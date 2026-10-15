@@ -373,3 +373,7 @@ main { overflow-y: auto; height: 100vh; }
 .sidebar-scroll { overflow-x: hidden; }
 .project .run-list li { min-width: 0; }
 .project .run-list { padding-right: 2px; }
+.offline-bar { position: fixed; top: 0; left: 0; right: 0; z-index: 50; background: var(--err); color: #fff; padding: 8px 16px; text-align: center; font-weight: 600; }
+.offline-bar[hidden] { display: none; }
+.offline-bar code { background: rgb(0 0 0 / .2); padding: 1px 6px; border-radius: 4px; }
+[hidden] { display: none !important; }

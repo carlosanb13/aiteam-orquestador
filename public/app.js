@@ -53,12 +53,31 @@ const agentTag = (id) => {
   return `<span class="agent-tag"><span class="dot" style="background:${a.color}"></span>${esc(a.name)}</span>`;
 };
 
+/** Aviso visible cuando el servidor de AITeam no responde. */
+function setOffline(offline) {
+  let bar = document.getElementById('offlineBar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'offlineBar';
+    bar.className = 'offline-bar';
+    bar.innerHTML = '⚠ Sin conexión con el servidor de AITeam. Arráncalo con <code>npm start</code> en la carpeta de AITeam; esta página se reconectará sola.';
+    document.body.prepend(bar);
+  }
+  bar.hidden = !offline;
+}
+
 async function api(method, url, body) {
-  const res = await fetch(url, {
+  let res;
+  try {
+    res = await fetch(url, {
     method,
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
-  });
+    });
+  } catch {
+    setOffline(true);
+    throw new Error('No hay conexión con el servidor de AITeam (¿está arrancado?).');
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error ?? `Error ${res.status}`);
   return data;
@@ -385,6 +404,16 @@ function appendLog(entry, scroll = true) {
 // ------------------------------------------------------------ tiempo real
 
 const events = new EventSource('/api/events');
+let wasOffline = false;
+events.addEventListener('error', () => {
+  wasOffline = true;
+  setOffline(true);
+});
+events.addEventListener('open', () => {
+  setOffline(false);
+  // Tras reiniciar el servidor, se recarga todo por si cambió algo mientras estaba apagado.
+  if (wasOffline) location.reload();
+});
 let runRenderQueued = false;
 events.addEventListener('run', (e) => {
   const run = JSON.parse(e.data);

@@ -181,7 +181,8 @@ function serveStatic(req, res, url) {
     res.writeHead(404);
     return res.end('No encontrado');
   }
-  res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] ?? 'application/octet-stream' });
+  // Sin caché: la interfaz cambia a menudo (las propias IAs la mejoran) y siempre debe verse la última versión.
+  res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] ?? 'application/octet-stream', 'Cache-Control': 'no-store' });
   fs.createReadStream(file).pipe(res);
 }
 
