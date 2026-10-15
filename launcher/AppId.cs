@@ -38,6 +38,26 @@ public static class AITeamAppId
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc f, IntPtr l);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
+    /// Integra la barra de título nativa con la paleta de AITeam (Windows 11).
+    public static int ColorWindowsTitled(string title, int caption, int text, int border)
+    {
+        int count = 0;
+        EnumWindows((h, l) =>
+        {
+            if (!IsWindowVisible(h)) return true;
+            var sb = new StringBuilder(512);
+            GetWindowText(h, sb, sb.Capacity);
+            if (sb.ToString() != title) return true;
+            int size = sizeof(int);
+            if (DwmSetWindowAttribute(h, 35, ref caption, size) == 0) count++;
+            DwmSetWindowAttribute(h, 36, ref text, size);
+            DwmSetWindowAttribute(h, 34, ref border, size);
+            return true;
+        }, IntPtr.Zero);
+        return count;
+    }
 
     static PropertyKey AppIdKey = new PropertyKey { fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), pid = 5 };
     static Guid StoreIid = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");

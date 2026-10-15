@@ -146,7 +146,7 @@ export class ChatManager extends EventEmitter {
   list() {
     return [...this.chats.values()]
       .sort((a, b) => (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt))
-      .map((c) => ({ id: c.id, title: c.title, createdAt: c.createdAt, updatedAt: c.updatedAt, agents: c.agents, repoPath: c.repoPath, working: c.working }));
+      .map((c) => ({ id: c.id, title: c.title, createdAt: c.createdAt, updatedAt: c.updatedAt, agents: c.agents, repoPath: c.repoPath, branch: c.worktree?.branch, working: c.working }));
   }
 
   get(id) {

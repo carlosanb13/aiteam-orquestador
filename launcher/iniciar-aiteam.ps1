@@ -68,6 +68,15 @@ $candidates = @(
 $browser = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 if ($browser) {
     Start-Process -FilePath $browser -ArgumentList "--app=$url", '--window-size=1440,900'
+    # La ventana --app usa la barra nativa de Windows; igualamos su color al encabezado oscuro de AITeam.
+    try {
+        Add-Type -Path (Join-Path $PSScriptRoot 'AppId.cs')
+        for ($i = 0; $i -lt 20; $i++) {
+            if ([AITeamAppId]::ColorWindowsTitled('AITeam', 0x001B1D1D, 0x00E7EBEC, 0x001B1D1D) -gt 0) { break }
+            Start-Sleep -Milliseconds 200
+        }
+    } catch { # En versiones de Windows sin este atributo, la app sigue abriendo normalmente.
+    }
 } else {
     Start-Process $url
 }

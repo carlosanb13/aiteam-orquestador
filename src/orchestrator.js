@@ -100,7 +100,7 @@ export class Orchestrator extends EventEmitter {
   list() {
     return [...this.runs.values()]
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-      .map((r) => ({ id: r.id, goal: r.goal, status: r.status, createdAt: r.createdAt, agents: r.agents, repoPath: r.repoPath }));
+      .map((r) => ({ id: r.id, goal: r.goal, status: r.status, createdAt: r.createdAt, agents: r.agents, repoPath: r.repoPath, baseBranch: r.baseBranch }));
   }
 
   get(id) {

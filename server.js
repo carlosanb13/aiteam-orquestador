@@ -310,6 +310,19 @@ const routes = [
   ],
   ['GET', /^\/api\/runs$/, (req, res) => send(res, 200, orchestrator.list())],
   ['POST', /^\/api\/runs$/, async (req, res) => send(res, 201, await orchestrator.create(await readBody(req)))],
+  ['POST', /^\/api\/runs\/([\w-]+)\/retry$/, async (req, res, m) => {
+    const old = orchestrator.get(m[1]);
+    if (!old) return send(res, 404, { error: 'No existe esa tarea.' });
+    if (!['failed', 'interrupted', 'cancelled'].includes(old.status)) return send(res, 400, { error: 'La tarea todavía está en curso o ya tiene un resultado.' });
+    const run = await orchestrator.create({
+      repoPath: old.repoPath, baseRef: old.baseBranch, goal: old.goal, agents: old.agents,
+      coordinator: old.coordinator, review: old.review, adversarial: old.adversarial,
+      testCommand: old.testCommand, autoApprove: old.autoApprove,
+    });
+    const chat = [...chats.chats.values()].find((c) => c.worktree?.branch === old.baseBranch);
+    if (chat) chats.addMessage(chat, { from: 'system', kind: 'notice', text: 'El equipo vuelve a intentar la tarea. El intento anterior sigue guardado para consulta.', meta: { runId: run.id } });
+    send(res, 201, { id: run.id, chatId: chat?.id ?? null });
+  }],
   [
     'GET',
     /^\/api\/runs\/([\w-]+)$/,
