@@ -50,6 +50,16 @@ Tu rama principal nunca se toca: tú decides qué fusionas.
   - **Codex CLI**: `npm i -g @openai/codex`, y luego `codex login` con tu cuenta de ChatGPT.
   - **Antigravity CLI** (`agy`, sustituto de Gemini CLI para cuentas personales): en PowerShell `irm https://antigravity.google/cli/install.ps1 | iex`; ejecuta `agy` una vez e inicia sesión con la cuenta de Google que tiene AI Pro.
 
+## Acceso directo (Windows)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File launchercrear-accesos.ps1
+```
+
+Crea **AITeam** en el escritorio y en el menú Inicio. Al abrirlo arranca el servidor en segundo plano (sin ventanas de consola) si no está en marcha, y abre la app en su propia ventana. Para tenerlo en la barra de tareas: clic derecho sobre el acceso → *Mostrar más opciones* → *Anclar a la barra de tareas* (o, con la app abierta, clic derecho en su icono de la barra → *Anclar*). Para apagarlo: **Ajustes → Apagar**. El registro del servidor queda en `data/servidor.log`.
+
+`launcher/crear-icono.ps1` regenera el icono.
+
 ## Uso
 
 ```bash

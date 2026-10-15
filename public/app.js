@@ -1133,6 +1133,17 @@ document.addEventListener('click', (e) => {
   imgDlg.showModal();
 });
 
+// ------------------------------------------------------------ apagar
+
+$('#shutdownBtn').addEventListener('click', async () => {
+  const busy = state.chats.some((c) => c.working) || state.runs.some((r) => ['planning', 'bidding', 'running', 'reviewing', 'integrating', 'attacking', 'testing'].includes(r.status));
+  const msg = busy ? 'Hay IAs trabajando ahora mismo y su trabajo se interrumpirá. ¿Apagar AITeam igualmente?' : '¿Apagar AITeam? Podrás volver a abrirlo con el acceso directo.';
+  if (!confirm(msg)) return;
+  await api('POST', '/api/shutdown').catch(() => {});
+  $('#settingsDlg').close();
+  document.body.innerHTML = '<div class="empty"><h1>AITeam está apagado</h1><p>Ábrelo de nuevo desde el acceso directo del escritorio. Ya puedes cerrar esta ventana.</p></div>';
+});
+
 // ------------------------------------------------------------ arranque
 
 await loadAgents();

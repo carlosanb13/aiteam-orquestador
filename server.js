@@ -13,7 +13,7 @@ import { loadConfig, saveConfig } from './src/config.js';
 const PORT = Number(process.env.PORT) || 4317;
 const HOST = '127.0.0.1';
 const PUBLIC = path.resolve(import.meta.dirname, 'public');
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };
 
 const orchestrator = new Orchestrator();
 const clients = new Set();
@@ -84,6 +84,15 @@ const routes = [
       const result = await checkAgent(m[1], { live: true });
       if (agentCache) Object.assign(agentCache.find((a) => a.id === m[1]), result);
       send(res, 200, result);
+    },
+  ],
+  [
+    'POST',
+    /^\/api\/shutdown$/,
+    (req, res) => {
+      send(res, 200, { ok: true });
+      console.log('Apagado solicitado desde la app.');
+      setTimeout(() => process.exit(0), 300);
     },
   ],
   ['GET', /^\/api\/usage$/, (req, res) => send(res, 200, getUsage())],

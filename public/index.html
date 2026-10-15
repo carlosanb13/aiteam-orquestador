@@ -4,8 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AITeam</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='9' cy='16' r='5' fill='%23d97757'/><circle cx='23' cy='10' r='5' fill='%2310a37f'/><circle cx='23' cy='22' r='5' fill='%234285f4'/></svg>" />
+    <link rel="icon" href="icon-192.png" />
     <link rel="stylesheet" href="style.css" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="icon-192.png" />
+    <meta name="theme-color" content="#1d1d1b" />
   </head>
   <body>
     <div class="layout" id="layout">
@@ -146,6 +149,13 @@
           <label><span>Rondas de corrección tras revisión</span><input name="maxFixRounds" type="number" min="0" max="5" /></label>
         </div>
         <div id="agentSettings"></div>
+        <div class="shutdown-row">
+          <div>
+            <b>Apagar AITeam</b>
+            <div class="muted small-text">Detiene el servidor. Se vuelve a abrir con el acceso directo.</div>
+          </div>
+          <button type="button" class="danger" id="shutdownBtn">Apagar</button>
+        </div>
         <div class="dialog-actions">
           <button value="cancel" class="ghost">Cancelar</button>
           <button id="saveSettings" value="default" class="primary">Guardar</button>
