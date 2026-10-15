@@ -70,4 +70,10 @@ export function watchForNotifications({ chats, orchestrator, agents, hasViewers 
     else if (run.status === 'done') toast('Tarea de equipo terminada', goal);
     else if (run.status === 'failed') toast('La tarea de equipo falló', `${goal}: ${short(run.error, 120)}`);
   });
+  orchestrator.on('bus-gate', ({ runId, gate }) => {
+    if (!hasViewers() && gate.kind === 'escalation' && gate.status === 'pending') toast('Decisión del equipo pendiente', short(gate.question));
+  });
+  orchestrator.on('bus-message', ({ runId, message }) => {
+    if (!hasViewers() && message.kind === 'ask' && message.to === 'user' && message.status === 'pending') toast('Pregunta del equipo', short(message.text));
+  });
 }

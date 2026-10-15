@@ -67,13 +67,11 @@ Barra lateral por proyectos con sus conversaciones y tareas, y un explorador de 
 
 Tu rama principal nunca se toca: tú decides qué fusionas.
 
-## Requisitos
-
 ## Utilidades inspiradas en Orca y OpenCode
 
 - **Bus de equipo:** cada tarea conserva hilos de mensajes entre agentes. Las preguntas admiten respuesta y tiempo límite; las puertas de decisión detienen un paso hasta elegir una opción. El tablero muestra la actividad de la tarea.
 - **Instantáneas por turno:** en una conversación puedes consultar los turnos y deshacer, rehacer o restaurar el estado de los archivos de un turno. Guarda o termina cambios pendientes antes de restaurar.
-- **Terminal de la copia:** ejecuta comandos en la copia de una conversación o en la copia de un agente de una tarea. La salida se transmite en directo, se puede cancelar y queda en un historial acotado. En el chat, `!comando` aporta su resultado al siguiente mensaje.
+- **Terminal de la copia:** ejecuta comandos en la copia de una conversación o en la copia de un agente de una tarea. La salida se transmite en directo, se puede cancelar y queda en un historial acotado.
 - **Modos Plan y Build:** `/plan` pide análisis sin editar archivos; `/build` vuelve a permitir cambios. `/plan <mensaje>` o `/build <mensaje>` aplica el modo solo a ese mensaje. El modo es independiente del ajuste de autonomía.
 - **Comandos personalizados:** crea `.aiteam/commands/nombre.md` en el proyecto. Puede empezar con frontmatter `description`, `agent` y `mode`; el cuerpo es la plantilla. Usa `$ARGUMENTS` para todos los argumentos o `$1`, `$2` para cada uno. Por ejemplo:
 
@@ -89,8 +87,13 @@ Tu rama principal nunca se toca: tú decides qué fusionas.
   Después escribe `/nombre archivo contexto` en el chat. Los comandos del proyecto tienen prioridad sobre los globales.
 - **Reglas y contexto:** `AGENTS.md` (o `CLAUDE.md`) aporta instrucciones del proyecto a los agentes. Cuando el historial supera el umbral configurado, AITeam resume los mensajes antiguos y conserva los recientes; `/compact` lo solicita manualmente.
 
+Las preguntas al usuario esperan hasta cinco minutos y, al vencer, el agente continúa con su propio criterio. Las escaladas esperan hasta cinco minutos y continúan por defecto; ambos tiempos se ajustan con `bus.askTimeoutMs` y `bus.gateTimeoutMs` en la configuración. Las preguntas y decisiones se responden mediante la API del bus.
+
 Las funciones se seleccionaron con un análisis guiado por REA de Orca y OpenCode, documentado en [Orca](docs/rea/orca.md) y [OpenCode](docs/rea/opencode.md). El documento de Orca indica las comprobaciones REA que quedaron pendientes de acceso.
 
+
+
+## Requisitos
 
 - Node.js 22 o superior y git.
 - Los CLIs que quieras usar, instalados y con la sesión iniciada con tu suscripción:

@@ -56,7 +56,7 @@ test('comandos leen frontmatter, expanden argumentos y desconocidos quedan intac
   assert.equal(parseFrontmatter('---\ndescription: Hola\n---\nCuerpo').data.description, 'Hola');
   assert.equal(expandTemplate('A: $1; todo: $ARGUMENTS', '"dos palabras" extra'), 'A: dos palabras; todo: "dos palabras" extra');
   assert.deepEqual(resolveSlash({ worktree: { path: dir } }, '/revisa archivo hoy'), { kind: 'custom', command: 'revisa', text: 'Revisa archivo con archivo hoy', agent: 'codex', mode: 'plan' });
-  assert.equal(resolveSlash({ worktree: { path: dir } }, '/noexiste'), null);
+  assert.equal(resolveSlash({ worktree: { path: dir } }, '/aiteam_test_comando_inexistente_7f2c'), null);
 });
 
 test('compactación supera el umbral y conserva mensajes recientes', async (t) => {
@@ -71,6 +71,9 @@ test('compactación supera el umbral y conserva mensajes recientes', async (t) =
 const waitExit = (entry, events) => new Promise((resolve, reject) => { const started = Date.now(); const poll = () => { if (events.some((e) => e.commandId === entry.id && e.type === 'exit')) return resolve(); if (Date.now() - started > 5000) return reject(new Error('terminal timeout')); setTimeout(poll, 10); }; poll(); });
 test('terminal ejecuta, cancela y recorta salida', async (t) => {
   const cwd = temp(t); const events = []; const emit = (_, e) => events.push(e); const ownerId = `test-${Date.now()}`;
+  const previousDir = process.env.AITEAM_TERMINALS_DIR;
+  process.env.AITEAM_TERMINALS_DIR = path.join(cwd, 'terminal-history');
+  t.after(() => { if (previousDir === undefined) delete process.env.AITEAM_TERMINALS_DIR; else process.env.AITEAM_TERMINALS_DIR = previousDir; });
   const command = process.platform === 'win32' ? "Write-Output 'ok'" : "printf ok";
   const done = terminal.execute({ kind: 'chats', ownerId, cwd, actor: 'user', command, emit });
   await waitExit(done, events); assert.equal(done.status, 'done'); assert.match(done.stdout, /ok/);
