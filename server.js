@@ -156,6 +156,7 @@ async function agentStatus(refresh = false) {
 const routes = [
   ...busRoutes(orchestrator, send, readBody, broadcast),
   ...snapshotRoutes(chats, send, readBody),
+  ...(await import('./src/routes-terminal.js')).terminalRoutes(chats, orchestrator, send, readBody, broadcast),
   ['GET', /^\/api\/agents$/, async (req, res, _m, url) => send(res, 200, { mock: MOCK, agents: await agentStatus(url.searchParams.has('refresh')) })],
   ['POST', /^\/api\/agents$/, async (req, res) => {
     const agent = addCustomAgent(await readBody(req));
