@@ -48,7 +48,7 @@ export default function commandRoutes({ chats, send, readBody }) {
       const c = chat.compaction;
       send(res, 200, {
         mode: chatMode(chat),
-        rules: rules ? { file: rules.name } : null,
+        rules: rules.length ? { file: rules.map((r) => r.name).join(', '), files: rules.map((r) => r.name) } : null,
         compaction: { ...compactionConfig(), state: c ? { summary: c.summary, count: c.count, at: c.at, by: c.by } : null },
       });
     }],

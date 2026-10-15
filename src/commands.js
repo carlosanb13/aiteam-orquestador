@@ -6,8 +6,9 @@ import { DATA_DIR } from './config.js';
 /**
  * Modos de agente por conversación (al estilo de OpenCode):
  * - "build": comportamiento normal; la IA edita archivos (y ejecuta comandos con control total).
- * - "plan": solo lectura; la IA analiza y propone sin editar. Se combina con la autonomía:
- *   en modo seguro solo lee; con control total puede además ejecutar comandos para analizar.
+ * - "plan": solo lectura; la IA analiza y propone sin editar, también con control total. Cada CLI
+ *   recibe su restricción (Claude: permission-mode plan; Codex: sandbox read-only; Antigravity: sin
+ *   permisos de edición) y, como garantía común, chat.js deshace lo que quede escrito tras el turno.
  */
 export const MODES = {
   build: { id: 'build', name: 'Construir', invoke: 'write' },

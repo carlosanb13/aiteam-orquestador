@@ -89,9 +89,10 @@ function claudeArgs(mode, autonomy, model, session) {
   if (session?.id) args.push(session.resume ? '--resume' : '--session-id', session.id);
   if (mode === 'write') {
     args.push('--permission-mode', autonomy === 'full' ? 'bypassPermissions' : 'acceptEdits');
-  } else if (mode === 'plan' && autonomy === 'full') {
-    // Modo plan con control total: puede ejecutar comandos para analizar, pero no editar archivos.
-    args.push('--permission-mode', 'bypassPermissions', '--disallowedTools', 'Edit', 'Write', 'NotebookEdit');
+  } else if (mode === 'plan') {
+    // Modo plan: el propio Claude Code solo permite herramientas y comandos de lectura (sin Bash que escriba),
+    // aunque la autonomía sea total. Además, chat.js deshace cualquier cambio que quede en la copia.
+    args.push('--permission-mode', 'plan', '--disallowedTools', 'Edit', 'Write', 'NotebookEdit');
   } else {
     args.push('--permission-mode', 'default', '--disallowedTools', 'Edit', 'Write', 'NotebookEdit');
   }
@@ -307,7 +308,7 @@ async function mockInvoke(agentId, { prompt, cwd, mode, onEvent }) {
 
 /**
  * Invoca una IA en modo no interactivo.
- * mode: "read" (solo lectura) | "plan" (solo lectura; con control total también puede ejecutar comandos para analizar)
+ * mode: "read" (solo lectura) | "plan" (solo lectura, también con control total; ver commands.js)
  *       | "write" (puede editar en `cwd`).
  * Devuelve { ok, text, error, sessionId, durationMs }.
  */

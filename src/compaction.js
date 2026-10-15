@@ -109,6 +109,9 @@ export async function compact(manager, chat, msgs, { render, available, onEvent,
       by: agent,
       chars: text.length,
     };
+    // Las sesiones reanudables conservan el historial antiguo: se descartan para que cada IA empiece
+    // una sesión nueva con el resumen en lugar de acumularlo encima de lo que ya tenía.
+    chat.sessions = {};
     manager.addMessage(chat, {
       from: 'system',
       kind: 'notice',

@@ -37,6 +37,20 @@ const short = (s, n = 160) => {
   return one.length > n ? `${one.slice(0, n)}…` : one;
 };
 
+/**
+ * Garantía del modo plan: devuelve la copia al commit de antes del turno y borra lo no versionado.
+ * Devuelve true si la IA había dejado cambios (archivos o commits propios).
+ */
+export async function revertPlanWrites(worktree, head) {
+  const status = await G.git(worktree, ['status', '--porcelain'], { allowFail: true });
+  const now = (await G.git(worktree, ['rev-parse', 'HEAD'], { allowFail: true })).stdout.trim();
+  const moved = Boolean(head && now && now !== head);
+  if (!status.stdout.trim() && !moved) return false;
+  await G.git(worktree, ['reset', '-q', '--hard', head || 'HEAD'], { allowFail: true });
+  await G.git(worktree, ['clean', '-fdq'], { allowFail: true });
+  return true;
+}
+
 /** Menciones del usuario: "@claude haz X" o "@equipo ...". */
 export function parseMentions(text, members) {
   const found = new Set();
@@ -372,7 +386,8 @@ export class ChatManager extends EventEmitter {
     chat.working = { agent, since: new Date().toISOString() };
     this.save(chat);
 
-    const session = chat.sessions[agent] ?? { id: agent === 'claude' ? crypto.randomUUID() : null, resume: false, seen: 0 };
+    const freshSession = () => ({ id: agent === 'claude' ? crypto.randomUUID() : null, resume: false, seen: 0 });
+    let session = chat.sessions[agent] ?? freshSession();
     const msgs = chat.messages.filter((m) => m.id !== request.id);
     const delta = transcript(msgs.slice(session.seen).filter((m) => m.from !== agent));
     // Si lo nuevo desde su último turno ya es enorme, se le manda el historial compactado completo.
@@ -393,6 +408,18 @@ export class ChatManager extends EventEmitter {
       this.emit('activity', { chatId: chat.id, agent, text });
     };
     const full = await Compaction.history(this, chat, msgs, { render: transcript, available: this.available(chat), onEvent, allowCompact: isNew });
+    // Si se envía el historial completo (compactado o no), reanudar la sesión antigua lo duplicaría
+    // encima de su contexto: se abre una nueva.
+    if (isNew && session.resume) session = freshSession();
+
+    // Modo plan: lo pendiente se guarda antes del turno para poder deshacer después cualquier escritura
+    // de la IA, sea cual sea su CLI (Antigravity y los conectores personalizados no tienen modo de solo lectura).
+    const readOnly = mode === 'plan';
+    let planHead = null;
+    if (readOnly) {
+      await G.commitAll(chat.worktree.path, '[aiteam] cambios pendientes antes del modo plan').catch(() => {});
+      planHead = (await G.git(chat.worktree.path, ['rev-parse', 'HEAD'], { allowFail: true })).stdout.trim() || null;
+    }
 
     const res = await invokeAgent(agent, {
       prompt: chatPrompt(chat, agent, req, isNew ? full : delta, isNew, hop, mode),
@@ -405,6 +432,11 @@ export class ChatManager extends EventEmitter {
       onSpawn: (child) => (q.child = child),
     });
     q.child = null;
+
+    if (readOnly && (await revertPlanWrites(chat.worktree.path, planHead))) {
+      onEvent('↩ Modo plan: se han deshecho los cambios en archivos.');
+      this.addMessage(chat, { from: 'system', kind: 'notice', text: `${AGENTS[agent].name} intentó modificar archivos en modo plan; se han deshecho los cambios. Usa /build si quieres aplicarlos.` });
+    }
 
     if (!res.ok) {
       if (res.cancelled || q.stopped) {
@@ -471,7 +503,8 @@ export class ChatManager extends EventEmitter {
         });
         break;
       }
-      q.items.push({ agent: d.to, request: { ...reply, text: d.text, from: agent, id: reply.id }, hop: hop + 1 });
+      // Las delegaciones heredan el modo de la petición original (p. ej. un /plan de un solo mensaje).
+      q.items.push({ agent: d.to, request: { ...reply, text: d.text, from: agent, id: reply.id }, hop: hop + 1, mode: modeOverride });
     }
   }
 

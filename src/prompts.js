@@ -12,36 +12,57 @@ const RULE_FILES = ['AGENTS.md', 'CLAUDE.md'];
 // Archivos que el propio CLI ya carga por su cuenta: no se repiten en el prompt.
 const NATIVE_RULES = { claude: 'CLAUDE.md', codex: 'AGENTS.md' };
 
-/** Archivo de reglas del proyecto en `dir` (AGENTS.md o, si no hay, CLAUDE.md). */
+/** Archivos de reglas del proyecto que existen en `dir` (AGENTS.md y/o CLAUDE.md, en ese orden). */
 export function findProjectRules(dir) {
-  if (!dir) return null;
-  for (const name of RULE_FILES) {
-    const file = path.join(dir, name);
+  if (!dir) return [];
+  return RULE_FILES.map((name) => ({ name, file: path.join(dir, name) })).filter(({ file }) => {
     try {
-      if (fs.statSync(file).isFile()) return { name, file };
+      return fs.statSync(file).isFile();
+    } catch {
+      return false; // no existe
+    }
+  });
+}
+
+/**
+ * Bloque de contexto con las reglas del proyecto que aplican a `agentId`, o '' si no hay ninguna.
+ * Se incluyen todos los archivos presentes salvo el que su CLI ya carga por su cuenta (así Claude
+ * recibe AGENTS.md y conserva CLAUDE.md, Codex al revés); si dos archivos son idénticos, va solo uno.
+ */
+export function projectRules(dir, agentId) {
+  const cfg = loadConfig().projectRules ?? {};
+  if (cfg.enabled === false) return '';
+  const native = NATIVE_RULES[agentId];
+  let nativeText = null;
+  if (native) {
+    try {
+      nativeText = fs.readFileSync(path.join(dir, native), 'utf8').trim();
     } catch {
       /* no existe */
     }
   }
-  return null;
-}
-
-/** Bloque de contexto con las reglas del proyecto para `agentId`, o '' si no hay o el CLI ya las lee solo. */
-export function projectRules(dir, agentId) {
-  const cfg = loadConfig().projectRules ?? {};
-  if (cfg.enabled === false) return '';
-  const found = findProjectRules(dir);
-  if (!found || NATIVE_RULES[agentId] === found.name) return '';
-  let text;
-  try {
-    text = fs.readFileSync(found.file, 'utf8').trim();
-  } catch {
-    return '';
+  const seen = new Set(nativeText ? [nativeText] : []);
+  const parts = [];
+  for (const found of findProjectRules(dir)) {
+    if (found.name === native) continue;
+    let text;
+    try {
+      text = fs.readFileSync(found.file, 'utf8').trim();
+    } catch {
+      continue;
+    }
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    parts.push({ name: found.name, text });
   }
-  if (!text) return '';
-  const max = cfg.maxChars ?? 20_000;
-  if (text.length > max) text = `${text.slice(0, max)}\n…(recortado)`;
-  return `\nREGLAS DEL PROYECTO (${found.name}; síguelas mientras no contradigan estas instrucciones):\n${text}\n`;
+  if (!parts.length) return '';
+  let budget = cfg.maxChars ?? 20_000;
+  const blocks = parts.map(({ name, text }) => {
+    const body = text.length > budget ? `${text.slice(0, Math.max(0, budget))}\n…(recortado)` : text;
+    budget = Math.max(0, budget - text.length);
+    return `REGLAS DEL PROYECTO (${name}; síguelas mientras no contradigan estas instrucciones):\n${body}`;
+  });
+  return `\n${blocks.join('\n\n')}\n`;
 }
 
 const JSON_RULE = `Termina SIEMPRE tu respuesta con un bloque JSON válido delimitado exactamente así:
