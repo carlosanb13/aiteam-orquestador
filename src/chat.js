@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import * as G from './git.js';
+import * as Snapshots from './snapshots.js';
 import { AGENTS, invokeAgent } from './agents.js';
 import { DATA_DIR, loadConfig } from './config.js';
 import { killTree } from './runner.js';
@@ -421,17 +422,24 @@ export class ChatManager extends EventEmitter {
       planHead = (await G.git(chat.worktree.path, ['rev-parse', 'HEAD'], { allowFail: true })).stdout.trim() || null;
     }
 
-    const res = await invokeAgent(agent, {
-      prompt: chatPrompt(chat, agent, req, isNew ? full : delta, isNew, hop, mode),
-      fallbackPrompt: chatPrompt(chat, agent, req, full, true, hop, mode),
-      cwd: chat.worktree.path,
-      mode: invokeMode(mode),
-      autonomy: chat.autonomy ?? loadConfig().autonomy,
-      session,
-      onEvent,
-      onSpawn: (child) => (q.child = child),
-    });
-    q.child = null;
+    const snapshotId = await Snapshots.beforeTurn(chat);
+    let res;
+    try {
+      res = await invokeAgent(agent, {
+        prompt: chatPrompt(chat, agent, req, isNew ? full : delta, isNew, hop, mode),
+        fallbackPrompt: chatPrompt(chat, agent, req, full, true, hop, mode),
+        cwd: chat.worktree.path,
+        mode: invokeMode(mode),
+        autonomy: chat.autonomy ?? loadConfig().autonomy,
+        session,
+        onEvent,
+        onSpawn: (child) => (q.child = child),
+      });
+    } finally {
+      q.child = null;
+      await Snapshots.afterTurn(chat, snapshotId);
+      this.save(chat);
+    }
 
     if (readOnly && (await revertPlanWrites(chat.worktree.path, planHead))) {
       onEvent('↩ Modo plan: se han deshecho los cambios en archivos.');

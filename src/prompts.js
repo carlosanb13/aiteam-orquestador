@@ -168,9 +168,11 @@ Instrucciones:
 - Céntrate en tu subtarea; no hagas el trabajo asignado a otros salvo lo imprescindible para que el tuyo funcione.
 - No hagas commits: el aiteamdor los hace por ti.
 - Si algo afecta a otro miembro del equipo (una interfaz, un nombre de función, un archivo compartido), avísale en "messages".
+- Para pedir una respuesta antes de continuar, incluye en el JSON final {"kind":"ask","to":"user|id_de_IA","text":"pregunta"} dentro de messages. El orquestador esperará la respuesta y te llamará de nuevo.
+- Si necesitas una decisión del usuario, incluye {"kind":"escalation","to":"user","text":"decisión necesaria"} dentro de messages. El orquestador pausará la subtarea hasta que el usuario decida.
 
 ${JSON_RULE}
-Formato: {"summary":"qué hiciste y qué archivos tocaste","messages":[{"to":"all|claude|codex|gemini","text":"..."}]}`;
+Formato: {"summary":"qué hiciste y qué archivos tocaste","messages":[{"to":"all|user|id_de_IA","text":"...","kind":"note|ask|escalation (opcional)"}]}`;
 }
 
 export function reviewPrompt(run, authorId, reviewerId, diff) {
