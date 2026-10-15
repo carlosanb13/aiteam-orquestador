@@ -6,6 +6,9 @@ import { loadConfig, saveConfig } from './config.js';
 import { recordClaudeRateLimit, recordCall, touchUsage } from './usage.js';
 import { mcpArgs } from './extensions.js';
 
+import { claudeInstallDenyRules, commandsInEvent, isInstallCommand, LEVEL_INFO } from './permissions.js';
+import { killTree } from './runner.js';
+
 export const AGENTS = {
   claude: {
     id: 'claude',
@@ -84,12 +87,16 @@ function tail(text, n = 1500) {
 
 // ---------------------------------------------------------------- Claude Code
 
-function claudeArgs(mode, autonomy, model, session, extra = []) {
+export function claudeArgs(mode, autonomy, model, session, extra = []) {
   const args = ['-p', '--output-format', 'stream-json', '--verbose'];
   // Sesión propia por conversación: la primera vez se crea con un id fijo y después se reanuda.
   if (session?.id) args.push(session.resume ? '--resume' : '--session-id', session.id);
   if (mode === 'write') {
-    args.push('--permission-mode', autonomy === 'full' ? 'bypassPermissions' : 'acceptEdits');
+    if (autonomy === 'full') args.push('--permission-mode', 'bypassPermissions');
+    else if (autonomy === 'project') {
+      // Comandos permitidos, pero Claude Code deniega por sí mismo cualquier instalación conocida.
+      args.push('--permission-mode', 'acceptEdits', '--allowedTools', 'Bash', 'PowerShell', '--disallowedTools', ...claudeInstallDenyRules());
+    } else args.push('--permission-mode', 'acceptEdits');
   } else if (mode === 'plan') {
     // Modo plan: el propio Claude Code solo permite herramientas y comandos de lectura (sin Bash que escriba),
     // aunque la autonomía sea total. Además, chat.js deshace cualquier cambio que quede en la copia.
@@ -133,7 +140,9 @@ function claudeResult(res, state) {
 
 // ---------------------------------------------------------------- Codex CLI
 
-function codexArgs(mode, autonomy, model, session, extra = []) {
+// "Protegido" y "Comandos en el proyecto" usan el mismo sandbox de Codex (workspace-write);
+// en el segundo, AITeam además detiene a Codex si intenta instalar algo (ver GUARDED_AGENTS).
+export function codexArgs(mode, autonomy, model, session, extra = []) {
   const resuming = session?.resume && session.id;
   const args = resuming ? ['exec', 'resume', '--json', '--skip-git-repo-check'] : ['exec', '--json', '--skip-git-repo-check'];
   if (mode === 'write' && autonomy === 'full') args.push('--dangerously-bypass-approvals-and-sandbox');
@@ -183,11 +192,13 @@ function codexResult(res, state) {
 
 // ---------------------------------------------------------------- Antigravity CLI (Gemini)
 
-function agyArgs(mode, autonomy, model, session) {
+export function agyArgs(mode, autonomy, model, session) {
   // El prompt va por stdin como NDJSON; "-p=" (vacío) activa el modo no interactivo.
   const args = ['--input-format', 'stream-json', '--output-format', 'stream-json'];
   if (mode === 'write') {
     if (autonomy === 'full') args.push('--dangerously-skip-permissions');
+    // Sin preguntar, pero con el sandbox de terminal de Antigravity, que corta la red (no se puede instalar nada).
+    else if (autonomy === 'project') args.push('--dangerously-skip-permissions', '--sandbox');
     else args.push('--mode', 'accept-edits');
   }
   if (session?.resume && session.id) args.push('--conversation', session.id);
@@ -353,11 +364,43 @@ async function invokeOnce(agentId, { prompt, cwd, repoPath, mode = 'read', onEve
   const adapter = ADAPTERS[agentId] ?? (AGENTS[agentId]?.custom ? customAdapter : null);
   if (!adapter) throw new Error(`IA desconocida: ${agentId}`);
   const args = adapter.args({ mode, autonomy, model, session, agent: AGENTS[agentId], extra: mcpArgs(agentId, repoPath) });
-  const onLine = (line) => adapter.line?.(line, state, emit);
+  // En «Comandos en el proyecto», AITeam vigila los comandos de las IAs cuyo CLI no bloquea instalaciones
+  // por sí mismo y las detiene en cuanto intentan instalar algo.
+  const guard = mode === 'write' && autonomy === 'project' && GUARDED_AGENTS(agentId);
+  let child = null;
+  const onLine = (line) => {
+    if (guard && !state.blocked) {
+      const cmd = commandsInEvent(line).find(isInstallCommand);
+      if (cmd) {
+        state.blocked = cmd;
+        emit(`⛔ AITeam detiene a ${AGENTS[agentId].name}: intentó instalar (${cmd.slice(0, 80)}).`);
+        if (child) killTree(child);
+        return;
+      }
+    }
+    adapter.line?.(line, state, emit);
+  };
 
   recordCall(agentId);
   const input = adapter.input?.(prompt) ?? prompt;
-  const res = await runProcess(AGENTS[agentId].cli, args, { cwd, input, timeoutMs: timeout, onLine, onSpawn });
+  const res = await runProcess(AGENTS[agentId].cli, args, {
+    cwd,
+    input,
+    timeoutMs: timeout,
+    onLine,
+    onSpawn: (c) => {
+      child = c;
+      onSpawn?.(c);
+    },
+  });
+  if (state.blocked) {
+    return {
+      ok: false,
+      policyBlocked: true,
+      error: `AITeam detuvo a ${AGENTS[agentId].name}: intentó instalar dependencias (\`${state.blocked.slice(0, 120)}\`) y el nivel «${LEVEL_INFO.project.label}» no lo permite. Si de verdad hace falta, activa «Control total».`,
+      durationMs: Date.now() - started,
+    };
+  }
   if (agentId === 'codex') touchUsage(); // Codex acaba de escribir su estado de límites en sus registros
   const durationMs = Date.now() - started;
   if (res.cancelled) return { ok: false, cancelled: true, error: 'Cancelado.', durationMs };
@@ -366,6 +409,9 @@ async function invokeOnce(agentId, { prompt, cwd, repoPath, mode = 'read', onEve
   const out = adapter.result(res, state);
   return { ...out, durationMs };
 }
+
+// CLIs que no bloquean instalaciones por sí mismos en «Comandos en el proyecto» (ver src/permissions.js).
+const GUARDED_AGENTS = (agentId) => agentId !== 'claude' && agentId !== 'gemini';
 
 const ADAPTERS = {
   claude: { args: ({ mode, autonomy, model, session, extra }) => claudeArgs(mode, autonomy, model, session, extra), line: claudeLine, result: claudeResult },

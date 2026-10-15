@@ -20,14 +20,22 @@ export function killTree(child) {
   }
 }
 
+/** Cita un argumento para cmd.exe si contiene espacios o caracteres especiales (y no comillas propias). */
+export function quoteWindowsArg(arg) {
+  const s = String(arg);
+  if (s === '' || s.includes('"') || !/[\s&|<>^()]/.test(s)) return s;
+  return `"${s}"`;
+}
+
 /**
  * Ejecuta un comando, le pasa `input` por stdin y llama a `onLine` por cada línea de stdout.
  * Devuelve { code, stdout, stderr, timedOut, cancelled }.
  */
 export function runProcess(cmd, args, { cwd, input, timeoutMs = 0, onLine, onSpawn, env } = {}) {
   return new Promise((resolve) => {
-    // Los CLIs instalados con npm en Windows son shims .cmd: necesitan shell.
-    const child = spawn(cmd, args, {
+    // Los CLIs instalados con npm en Windows son shims .cmd: necesitan shell, y con shell
+    // los argumentos con espacios (p. ej. reglas "Bash(npm install:*)") deben ir entre comillas.
+    const child = spawn(cmd, isWindows ? args.map(quoteWindowsArg) : args, {
       cwd,
       shell: isWindows,
       windowsHide: true,

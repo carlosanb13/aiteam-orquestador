@@ -600,3 +600,6 @@ details.attempts summary { cursor: pointer; color: var(--muted); }
 .caps { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
 .rv-img { height: 220px; overflow: hidden; }
 .rv-img img { max-height: 196px !important; width: auto !important; max-width: 100%; }
+
+/* ---------- niveles de permisos ---------- */
+.level-hint { display: block; margin-top: 4px; line-height: 1.35; }

@@ -6,6 +6,7 @@ import * as G from './git.js';
 import * as P from './prompts.js';
 import { AGENTS, invokeAgent, isNetworkError } from './agents.js';
 import { CAPABILITIES, canDo, describeRequires, detectRequires, missingFor } from './capabilities.js';
+import { normalizeLevel } from './permissions.js';
 import { DATA_DIR, loadConfig } from './config.js';
 import { killTree, runShell } from './runner.js';
 import { Bus } from './bus.js';
@@ -314,7 +315,7 @@ export class Orchestrator extends EventEmitter {
       activeAgents: [],
       coordinator,
       testCommand: String(input.testCommand ?? '').trim(),
-      autonomy: ['edits', 'full'].includes(input.autonomy) ? input.autonomy : loadConfig().autonomy,
+      autonomy: normalizeLevel(input.autonomy, loadConfig().autonomy),
       autoApprove: Boolean(input.autoApprove),
       review: input.review !== false,
       adversarial: Boolean(input.adversarial),

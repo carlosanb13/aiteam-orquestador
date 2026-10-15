@@ -208,7 +208,9 @@ function showNew(repo) {
   if (lastRepo) $('[name=repoPath]').value = lastRepo;
 
   $('[data-agent-pick]').innerHTML = agentPickHtml();
+  fillLevelSelects($('#newRunForm'));
   $('#newRunForm').elements.autonomy.value = state.defaultAutonomy;
+  $('#newRunForm').elements.autonomy.onchange?.();
   const syncCoordinator = () => {
     const chosen = [...document.querySelectorAll('[name=agents]:checked')].map((i) => i.value);
     const sel = $('#coordinatorSel');
@@ -572,7 +574,9 @@ events.addEventListener('log', (e) => {
 $('#settingsBtn').addEventListener('click', async () => {
   const cfg = await api('GET', '/api/config');
   const form = $('#settingsForm');
+  fillLevelSelects(form);
   form.autonomy.value = cfg.autonomy;
+  form.autonomy.onchange?.();
   form.taskTimeoutMinutes.value = cfg.taskTimeoutMinutes;
   form.maxFixRounds.value = cfg.maxFixRounds;
   $('#agentSettings').innerHTML = state.agents
@@ -782,8 +786,7 @@ function renderChatHead() {
     <div class="actions chat-actions">
       ${chat.working ? '<button class="danger" id="chatStop">Detener</button>' : ''}
       <div class="seg" id="chatAutonomy" title="Qué pueden hacer las IAs en esta conversación">
-        <button type="button" data-mode="edits" class="${(chat.autonomy ?? state.defaultAutonomy) !== 'full' ? 'on' : ''}" title="Trabajan en una copia con las restricciones de su CLI">${icon('lock')} Protegido</button>
-        <button type="button" data-mode="full" class="${(chat.autonomy ?? state.defaultAutonomy) === 'full' ? 'on warn-on' : ''}" title="Pueden ejecutar comandos e instalar cosas">${icon('bolt')} Control total</button>
+        ${levelButtons(chat.autonomy ?? state.defaultAutonomy)}
       </div>
       <button id="chatFiles">${icon('folder')} Archivos</button>
       <button id="chatDiff" class="primary">${icon('fileDiff')} Revisar cambios</button>
@@ -804,6 +807,7 @@ function renderChatHead() {
   $('#chatAutonomy').addEventListener('click', async (e) => {
     const value = e.target.closest('[data-mode]')?.dataset.mode;
     if (!value || value === (chat.autonomy ?? state.defaultAutonomy)) return;
+    if (value === 'project' && !confirm(`«${levelInfo('project').label}»: ${levelInfo('project').short}.\n\n${levelInfo('project').guarantees}\n\n¿Activarlo en esta conversación?`)) return;
     if (
       value === 'full' &&
       !confirm('Con "Control total" las IAs pueden ejecutar cualquier comando en tu PC (instalar programas, lanzar servidores, borrar archivos…) sin pedirte permiso. ¿Activarlo en esta conversación?')
@@ -2341,6 +2345,44 @@ $('#restartBtn').addEventListener('click', async () => {
   await restartAITeam();
 });
 
+// ------------------------------------------------------------ niveles de permisos
+
+state.levels = [];
+const LEVEL_ICONS = { edits: 'lock', project: 'tool', full: 'bolt' };
+const levelInfo = (id) => state.levels.find((l) => l.id === id) ?? { id, label: id, short: '', guarantees: '' };
+
+async function loadLevels() {
+  try {
+    state.levels = (await api('GET', '/api/permissions')).levels;
+  } catch {
+    state.levels = [];
+  }
+  fillLevelSelects();
+}
+
+/** Botones del selector de permisos de la cabecera del chat. */
+function levelButtons(current) {
+  return state.levels
+    .map((l) => {
+      const on = current === l.id;
+      return `<button type="button" data-mode="${l.id}" class="${on ? `on ${l.id === 'full' ? 'warn-on' : ''}` : ''}" title="${esc(`${l.short}. ${l.guarantees}`)}">${icon(LEVEL_ICONS[l.id] ?? 'lock')} ${esc(l.id === 'project' ? 'Comandos' : l.label)}</button>`;
+    })
+    .join('');
+}
+
+/** Rellena los selectores de permisos (formulario de tareas y Ajustes) y su explicación. */
+function fillLevelSelects(root = document) {
+  for (const sel of root.querySelectorAll('select[data-levels]')) {
+    const value = sel.value || state.defaultAutonomy;
+    sel.innerHTML = state.levels.map((l) => `<option value="${l.id}">${esc(`${l.label}: ${l.short}`)}</option>`).join('');
+    if (value && state.levels.some((l) => l.id === value)) sel.value = value;
+    const hint = sel.parentElement.querySelector('[data-level-hint]');
+    const show = () => hint && (hint.textContent = levelInfo(sel.value).guarantees);
+    sel.onchange = show;
+    show();
+  }
+}
+
 // ------------------------------------------------------------ apagar
 
 $('#shutdownBtn').addEventListener('click', async () => {
@@ -2360,6 +2402,7 @@ await loadAgents();
   state.defaultAutonomy = cfg.autonomy;
   state.notify = { enabled: cfg.notifications?.enabled !== false, sound: cfg.notifications?.sound !== false };
 }
+await loadLevels();
 await Promise.all([loadRuns(), loadChats(), loadProjects(), loadUsage(), loadSpeech()]);
 // Estado inicial para detectar cambios (y no avisar de lo que ya había pasado).
 for (const c of state.chats) prevChatWorking.set(c.id, Boolean(c.working));

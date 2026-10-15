@@ -3,6 +3,7 @@ import path from 'node:path';
 import { AGENTS } from './agents.js';
 import { loadConfig } from './config.js';
 import { CAPABILITY_IDS, agentCapabilities, capabilitiesText, describeRequires } from './capabilities.js';
+import { levelPromptText } from './permissions.js';
 
 const agentNames = () => Object.fromEntries(Object.values(AGENTS).map((a) => [a.id, a.name]));
 
@@ -160,6 +161,8 @@ ${planText(run)}
 TABLERO DE MENSAJES DEL EQUIPO:
 ${boardText(run, agentId)}
 ${deps ? `\nTRABAJO PREVIO DEL QUE DEPENDES (ya está fusionado en tu copia):\n${deps}\n` : ''}${projectRules(run.worktrees?.[agentId]?.path ?? run.repoPath, agentId)}
+PERMISOS: ${levelPromptText(run.autonomy ?? loadConfig().autonomy)}
+
 TU SUBTAREA AHORA: ${task.id} — ${task.title}
 ${task.description}
 

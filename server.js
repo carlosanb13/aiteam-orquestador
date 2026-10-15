@@ -14,6 +14,7 @@ import * as Extensions from './src/extensions.js';
 import { getUsage, onUsageChange } from './src/usage.js';
 import * as Projects from './src/projects.js';
 import * as Review from './src/review.js';
+import { LEVEL_INFO, LEVELS } from './src/permissions.js';
 import * as Speech from './src/speech.js';
 import { watchForNotifications } from './src/notify.js';
 import { loadConfig, saveConfig } from './src/config.js';
@@ -308,6 +309,7 @@ const routes = [
   ],
   ['GET', /^\/api\/fs\/file$/, (req, res, m, url) => send(res, 200, Projects.readFile(url.searchParams.get('root'), url.searchParams.get('path'), allowedRoots()))],
   ['PATCH', /^\/api\/chats\/([\w-]+)$/, async (req, res, m) => send(res, 200, chats.update(m[1], await readBody(req)))],
+  ['GET', /^\/api\/permissions$/, (req, res) => send(res, 200, { levels: LEVELS.map((id) => ({ id, ...LEVEL_INFO[id] })) })],
   ['GET', /^\/api\/config$/, (req, res) => send(res, 200, loadConfig())],
   [
     'PUT',

@@ -87,7 +87,7 @@
             <legend>IAs que participan</legend>
             <div class="agent-pick" data-agent-pick></div>
           </fieldset>
-          <label><span>Permisos de esta tarea</span><select name="autonomy"><option value="edits">Protegido: trabajar en copias con permisos del CLI</option><option value="full">Control total: ejecutar sin pedir permiso</option></select></label>
+          <label><span>Permisos de esta tarea</span><select name="autonomy" data-levels></select><span class="muted small-text level-hint" data-level-hint></span></label>
           <div class="row">
             <label>
               <span>Coordinadora (divide el trabajo)</span>
@@ -159,10 +159,8 @@
         </fieldset>
         <label>
           <span>Autonomía de las IAs</span>
-          <select name="autonomy">
-            <option value="edits">Protegido: copia aislada y restricciones del CLI (recomendado)</option>
-            <option value="full">Control total: también ejecutar comandos sin pedir permiso</option>
-          </select>
+          <select name="autonomy" data-levels></select>
+          <span class="muted small-text level-hint" data-level-hint></span>
         </label>
         <div class="row">
           <label><span>Tiempo máximo por subtarea (min)</span><input name="taskTimeoutMinutes" type="number" min="1" max="240" /></label>

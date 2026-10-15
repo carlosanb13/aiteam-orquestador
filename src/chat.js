@@ -8,6 +8,7 @@ import { AGENTS, invokeAgent } from './agents.js';
 import { DATA_DIR, loadConfig } from './config.js';
 import { killTree } from './runner.js';
 import { canDo, describeRequires, detectRequires } from './capabilities.js';
+import { LEVEL_INFO, LEVELS, levelPromptText } from './permissions.js';
 import { projectRules } from './prompts.js';
 import { chatMode, invokeMode, modeText, resolveSlash, setChatMode } from './commands.js';
 import * as Compaction from './compaction.js';
@@ -120,9 +121,7 @@ Eres @${AGENTS[agent].handle} (${AGENTS[agent].name}) y formas parte de AITeam, 
 EQUIPO:
 ${teamText(chat.agents)}
 
-MODO: ${(chat.autonomy ?? loadConfig().autonomy) === 'full'
-    ? 'CONTROL TOTAL. Puedes ejecutar comandos, instalar dependencias y herramientas, lanzar servidores, usar la web y tus servidores MCP sin pedir permiso. Úsalo con responsabilidad: nada destructivo fuera del proyecto sin que el usuario lo pida.'
-    : 'PROTEGIDO. Trabaja dentro de la copia del proyecto con los permisos del CLI; evita instalaciones y operaciones fuera del proyecto. Si necesitas acceso completo, explícalo al usuario.'}
+PERMISOS: ${levelPromptText(chat.autonomy ?? loadConfig().autonomy)}
 ${modeText(mode)}${projectRules(chat.worktree.path, agent)}
 ESPACIO DE TRABAJO: el directorio actual es una copia del proyecto del usuario${chat.repoPath ? ` (${chat.repoPath})` : ''} compartida por todo el equipo en esta conversación. Puedes leer y modificar archivos; tus cambios quedan guardados y tus compañeros los verán. El usuario decidirá después si los aplica a su proyecto.
 
@@ -242,16 +241,10 @@ export class ChatManager extends EventEmitter {
   update(id, patch) {
     const chat = this.chats.get(id);
     if (!chat) throw new Error('No existe esa conversación.');
-    if (patch.autonomy && ['edits', 'full'].includes(patch.autonomy) && patch.autonomy !== chat.autonomy) {
+    if (patch.autonomy && LEVELS.includes(patch.autonomy) && patch.autonomy !== chat.autonomy) {
       chat.autonomy = patch.autonomy;
-      this.addMessage(chat, {
-        from: 'system',
-        kind: 'notice',
-        text:
-          chat.autonomy === 'full'
-            ? 'Control total activado: las IAs pueden ejecutar comandos, instalar dependencias y usar sus herramientas sin pedir permiso.'
-            : 'Modo protegido: las IAs trabajan en la copia con las restricciones de sus CLI.',
-      });
+      const info = LEVEL_INFO[chat.autonomy];
+      this.addMessage(chat, { from: 'system', kind: 'notice', text: `Permisos: ${info.label}. ${info.short}. ${info.guarantees}` });
     }
     if (typeof patch.title === 'string' && patch.title.trim()) {
       chat.title = short(patch.title, 80);

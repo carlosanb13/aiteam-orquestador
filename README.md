@@ -25,7 +25,7 @@ Un chat único donde hablas con todas a la vez:
 - **Relevo automático**: si una se queda sin cuota, otra atiende la misma petición.
 - Trabajan sobre una **copia aislada** del proyecto (una rama git propia de la conversación). Con **Ver cambios** revisas el diff y, si te convence, lo fusionas.
 - `/equipo <objetivo>` lanza una tarea de equipo completa a partir de lo hecho en la conversación.
-- **Modo protegido / Control total** por conversación: el protegido trabaja en la copia con las restricciones propias de cada CLI; el total elimina sus comprobaciones para permitir comandos y herramientas sin pausa. Las tareas nuevas eligen su permiso por separado.
+- **Tres niveles de permisos** por conversación y por tarea (ver [Permisos](#permisos)): *Protegido*, *Comandos en el proyecto* y *Control total*.
 
 ### ✅ Revisar y aplicar
 - **Revisar cambios** muestra cada archivo que tocaron las IAs con su diff (e imágenes). Puedes **Aceptar**, **Rechazar** (deshace ese archivo en la copia) o **Pedir cambios** a una IA concreta sobre ese archivo.
@@ -133,6 +133,16 @@ npm run mock       # modo simulación: no llama a ninguna IA, para probar la int
 3. **Probar** en el panel de equipo comprueba que cada IA responde con tu sesión.
 
 > Puedes usar AITeam para mejorar AITeam: añade esta misma carpeta como proyecto. Las IAs trabajan en una copia aparte, así que la app sigue funcionando; cuando te guste el resultado, fusiona la rama y reinicia.
+
+## Permisos
+
+| Nivel | Qué pueden hacer las IAs | Cómo se aplica |
+|---|---|---|
+| **Protegido** | Editar archivos en su copia | Claude: `acceptEdits`. Antigravity: `--mode accept-edits`. Codex: sandbox `workspace-write` (puede ejecutar comandos dentro de él). |
+| **Comandos en el proyecto** | Ejecutar tests, builds y servidores, sin instalar nada | Claude: `--allowedTools Bash PowerShell` y `--disallowedTools` con las órdenes de instalación (npm/pip/winget…). Antigravity: `--sandbox` (sin red, las instalaciones fallan). Codex y otros CLIs: AITeam vigila cada comando y **detiene a la IA** si intenta instalar. La terminal de AITeam aplica la misma regla. |
+| **Control total** | Cualquier cosa | Claude: `bypassPermissions`. Codex: sin sandbox. Antigravity: `--dangerously-skip-permissions`. |
+
+Límites conocidos, comprobados en Windows: ningún nivel salvo *Protegido* en Claude y Antigravity impide que **un comando** escriba fuera de la carpeta del proyecto; y el sandbox de Codex en Windows (modo *unelevated*) no bloquea la red ni la escritura fuera de la carpeta. La interfaz lo explica junto a cada nivel.
 
 ## Ajustes
 

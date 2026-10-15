@@ -1,3 +1,4 @@
+import { isInstallCommand } from './permissions.js';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -61,7 +62,10 @@ export function worktreeFor(chats, orchestrator, kind, id, agent) {
 
 /** One command per spawn; output is streamed and retained as a bounded history entry. */
 export function execute({ kind, ownerId, cwd, autonomy, command, actor = 'user', emit = () => {} }) {
-  if (actor !== 'user' && autonomy !== 'full') throw new Error('Las IAs no pueden ejecutar comandos en modo seguro.');
+  if (actor !== 'user' && autonomy === 'edits') throw new Error('Las IAs no pueden ejecutar comandos en modo protegido.');
+  if (actor !== 'user' && autonomy === 'project' && isInstallCommand(command)) {
+    throw new Error('En «Comandos en el proyecto» las IAs no pueden instalar dependencias ni programas. Activa «Control total» si hace falta.');
+  }
   if (typeof command !== 'string' || !command.trim() || command.length > 20_000) throw new Error('Comando vacío o demasiado largo.');
   if (!['chats', 'runs'].includes(kind) || !/^[\w-]+$/.test(ownerId)) throw new Error('Terminal desconocida.');
   const id = randomUUID();
