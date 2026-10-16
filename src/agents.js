@@ -41,10 +41,13 @@ export const AGENTS = {
   },
 };
 
+import { ORCA_CATALOG } from './discovery.js';
+
 const BUILTIN_IDS = new Set(Object.keys(AGENTS));
+const CATALOG_BY_ID = new Map(ORCA_CATALOG.map((c) => [c.id, c]));
 const SAFE_ID = /^[a-z][a-z0-9_]{1,23}$/;
 const SAFE_COMMAND = /^[a-zA-Z0-9_.-]+$/;
-const SAFE_ARG = /^[a-zA-Z0-9_./:=+-]+$/;
+const SAFE_ARG = /^[^\r\n\0]{1,120}$/;
 
 function validateCustom(input) {
   const id = String(input.id ?? '').trim().toLowerCase();
@@ -54,23 +57,96 @@ function validateCustom(input) {
   if (!SAFE_ID.test(id) || BUILTIN_IDS.has(id) || id === 'equipo' || id === 'todos' || id === 'team') throw new Error('Identificador inválido o reservado (2–24 letras, números o guion bajo).');
   if (!name || name.length > 48) throw new Error('El nombre debe tener entre 1 y 48 caracteres.');
   if (!SAFE_COMMAND.test(command)) throw new Error('Indica el nombre del ejecutable disponible en PATH, sin rutas ni espacios.');
-  if (!Array.isArray(args) || args.length > 20 || args.some((a) => typeof a !== 'string' || !SAFE_ARG.test(a))) throw new Error('Los argumentos deben ser una lista de opciones simples, sin espacios ni caracteres de shell.');
-  return { id, name, handle: id, vendor: 'CLI personalizado', tagline: String(input.tagline ?? '').trim().slice(0, 120), cli: command, args, color: '#8b6fd6', custom: true };
+  if (!Array.isArray(args) || args.length > 24 || args.some((a) => typeof a !== 'string' || !SAFE_ARG.test(a))) throw new Error('Los argumentos deben ser una lista de opciones válidas.');
+  const cat = CATALOG_BY_ID.get(id);
+  return {
+    id,
+    name,
+    handle: id,
+    vendor: input.vendor || cat?.vendor || 'CLI personalizado',
+    tagline: String(input.tagline ?? cat?.tagline ?? '').trim().slice(0, 120),
+    cli: command,
+    args,
+    delivery: input.delivery || cat?.delivery || 'stdin',
+    displayCmd: input.displayCmd || cat?.displayCmd || [command, ...args].join(' '),
+    color: input.color || cat?.color || '#8b6fd6',
+    custom: !cat?.builtin,
+    catalogId: cat ? cat.id : undefined,
+  };
 }
 
-for (const item of Object.values(loadConfig().customAgents ?? {})) {
-  try { const agent = validateCustom(item); AGENTS[agent.id] = agent; } catch { /* configuración antigua o dañada */ }
+export function syncRegisteredAgents() {
+  const cfg = loadConfig();
+  for (const id of Object.keys(AGENTS)) {
+    if (!BUILTIN_IDS.has(id)) delete AGENTS[id];
+  }
+  // Agentes del catálogo de Orca activados por el usuario
+  for (const [id, aCfg] of Object.entries(cfg.agents ?? {})) {
+    if (BUILTIN_IDS.has(id)) continue;
+    const cat = CATALOG_BY_ID.get(id);
+    if (cat && aCfg?.enabled) {
+      AGENTS[id] = {
+        id: cat.id,
+        name: cat.name,
+        handle: cat.id,
+        vendor: cat.vendor,
+        tagline: cat.tagline,
+        cli: aCfg.command || cat.command,
+        args: Array.isArray(aCfg.args) && aCfg.args.length ? aCfg.args : cat.defaultArgs,
+        delivery: aCfg.delivery || cat.delivery || 'stdin',
+        displayCmd: aCfg.displayCmd || cat.displayCmd,
+        color: cat.color || '#8b6fd6',
+        custom: true,
+        catalogId: cat.id,
+      };
+    }
+  }
+  // Agentes personalizados creados manualmente
+  for (const item of Object.values(cfg.customAgents ?? {})) {
+    try {
+      const agent = validateCustom(item);
+      if (cfg.agents?.[agent.id]?.enabled !== false) AGENTS[agent.id] = agent;
+    } catch { /* configuración antigua o dañada */ }
+  }
 }
+
+syncRegisteredAgents();
 
 export function addCustomAgent(input) {
   const agent = validateCustom(input);
-  if (AGENTS[agent.id]) throw new Error('Ya existe una IA con ese identificador.');
   saveConfig({
     customAgents: { [agent.id]: agent },
-    agents: { [agent.id]: { enabled: true, model: '', profile: String(input.profile ?? '').trim().slice(0, 1000), capabilities: [] } },
+    agents: { [agent.id]: { enabled: true, model: '', profile: String(input.profile ?? agent.tagline ?? '').trim().slice(0, 1000), capabilities: [] } },
   });
-  AGENTS[agent.id] = agent;
-  return agent;
+  syncRegisteredAgents();
+  return AGENTS[agent.id] ?? agent;
+}
+
+export function configureCatalogAgent(id, { enabled, command, args, displayCmd, makeDefault } = {}) {
+  const cfg = loadConfig();
+  const cat = CATALOG_BY_ID.get(id);
+  const existing = AGENTS[id] || cfg.customAgents?.[id];
+  if (!cat && !existing) throw new Error(`Agente desconocido: ${id}`);
+  const prev = cfg.agents?.[id] ?? {};
+  const nextAgentCfg = {
+    ...prev,
+    enabled: typeof enabled === 'boolean' ? enabled : (prev.enabled ?? true),
+    profile: prev.profile || cat?.tagline || existing?.tagline || '',
+    capabilities: prev.capabilities ?? [],
+  };
+  if (command && SAFE_COMMAND.test(command.trim())) nextAgentCfg.command = command.trim();
+  if (Array.isArray(args)) nextAgentCfg.args = args.map((s) => String(s).trim()).filter(Boolean);
+  if (typeof displayCmd === 'string' && displayCmd.trim()) {
+    nextAgentCfg.displayCmd = displayCmd.trim();
+    const parts = displayCmd.trim().split(/\s+/);
+    if (parts[0] && SAFE_COMMAND.test(parts[0])) nextAgentCfg.command = parts[0];
+  }
+  const patch = { agents: { [id]: nextAgentCfg } };
+  if (makeDefault) patch.defaultAgent = id;
+  else if (cfg.defaultAgent === id && nextAgentCfg.enabled === false) patch.defaultAgent = 'claude';
+  saveConfig(patch);
+  syncRegisteredAgents();
+  return { id, enabled: nextAgentCfg.enabled, defaultAgent: loadConfig().defaultAgent };
 }
 
 export const MOCK = process.argv.includes('--mock') || process.env.AITEAM_MOCK === '1';
@@ -87,7 +163,7 @@ function tail(text, n = 1500) {
 
 // ---------------------------------------------------------------- Claude Code
 
-export function claudeArgs(mode, autonomy, model, session, extra = []) {
+export function claudeArgs(mode, autonomy, model, session, extra = [], effort = '') {
   const args = ['-p', '--output-format', 'stream-json', '--verbose'];
   // Sesión propia por conversación: la primera vez se crea con un id fijo y después se reanuda.
   if (session?.id) args.push(session.resume ? '--resume' : '--session-id', session.id);
@@ -105,6 +181,7 @@ export function claudeArgs(mode, autonomy, model, session, extra = []) {
     args.push('--permission-mode', 'default', '--disallowedTools', 'Edit', 'Write', 'NotebookEdit');
   }
   if (model) args.push('--model', model);
+  if (effort && ['low', 'medium', 'high', 'max'].includes(effort)) args.push('--effort', effort === 'max' ? 'high' : effort);
   args.push(...extra);
   return args;
 }
@@ -142,7 +219,7 @@ function claudeResult(res, state) {
 
 // "Protegido" y "Comandos en el proyecto" usan el mismo sandbox de Codex (workspace-write);
 // en el segundo, AITeam además detiene a Codex si intenta instalar algo (ver GUARDED_AGENTS).
-export function codexArgs(mode, autonomy, model, session, extra = []) {
+export function codexArgs(mode, autonomy, model, session, extra = [], effort = '') {
   const resuming = session?.resume && session.id;
   const args = resuming ? ['exec', 'resume', '--json', '--skip-git-repo-check'] : ['exec', '--json', '--skip-git-repo-check'];
   if (mode === 'write' && autonomy === 'full') args.push('--dangerously-bypass-approvals-and-sandbox');
@@ -151,6 +228,7 @@ export function codexArgs(mode, autonomy, model, session, extra = []) {
   // El sandbox "elevated" de Windows no puede escribir en las copias de trabajo; el no elevado sí.
   if (process.platform === 'win32') args.push('-c', 'windows.sandbox=unelevated');
   if (model) args.push('-m', model);
+  if (effort && ['low', 'medium', 'high', 'max'].includes(effort)) args.push('-c', `model_reasoning_effort=${effort === 'max' ? 'high' : effort}`);
   args.push(...extra);
   if (resuming) args.push(session.id);
   args.push('-');
@@ -349,21 +427,21 @@ export async function invokeAgent(agentId, options) {
   return res;
 }
 
-async function invokeOnce(agentId, { prompt, cwd, repoPath, mode = 'read', onEvent, onSpawn, timeoutMs, session, model: modelOverride, autonomy: autonomyOverride }) {
+async function invokeOnce(agentId, { prompt, cwd, repoPath, mode = 'read', onEvent, onSpawn, timeoutMs, session, model: modelOverride, effort = '', autonomy: autonomyOverride }) {
   const started = Date.now();
   if (MOCK) return { ...(await mockInvoke(agentId, { prompt, cwd, mode, onEvent })), durationMs: Date.now() - started };
 
   const config = loadConfig();
   const agentCfg = config.agents[agentId] ?? {};
   const autonomy = autonomyOverride ?? config.autonomy;
-  const model = modelOverride ?? agentCfg.model?.trim();
+  const model = modelOverride || agentCfg.model?.trim() || '';
   const timeout = timeoutMs ?? config.taskTimeoutMinutes * 60_000;
   const state = {};
   const emit = (msg) => onEvent?.(msg);
 
   const adapter = ADAPTERS[agentId] ?? (AGENTS[agentId]?.custom ? customAdapter : null);
   if (!adapter) throw new Error(`IA desconocida: ${agentId}`);
-  const args = adapter.args({ mode, autonomy, model, session, agent: AGENTS[agentId], extra: mcpArgs(agentId, repoPath) });
+  const args = adapter.args({ mode, autonomy, model, effort, session, prompt, agent: AGENTS[agentId], extra: mcpArgs(agentId, repoPath) });
   // En «Comandos en el proyecto», AITeam vigila los comandos de las IAs cuyo CLI no bloquea instalaciones
   // por sí mismo y las detiene en cuanto intentan instalar algo.
   const guard = mode === 'write' && autonomy === 'project' && GUARDED_AGENTS(agentId);
@@ -382,7 +460,7 @@ async function invokeOnce(agentId, { prompt, cwd, repoPath, mode = 'read', onEve
   };
 
   recordCall(agentId);
-  const input = adapter.input?.(prompt) ?? prompt;
+  const input = adapter.input ? adapter.input(prompt, AGENTS[agentId]) : prompt;
   const res = await runProcess(AGENTS[agentId].cli, args, {
     cwd,
     input,
@@ -414,27 +492,52 @@ async function invokeOnce(agentId, { prompt, cwd, repoPath, mode = 'read', onEve
 const GUARDED_AGENTS = (agentId) => agentId !== 'claude' && agentId !== 'gemini';
 
 const ADAPTERS = {
-  claude: { args: ({ mode, autonomy, model, session, extra }) => claudeArgs(mode, autonomy, model, session, extra), line: claudeLine, result: claudeResult },
-  codex: { args: ({ mode, autonomy, model, session, extra }) => codexArgs(mode, autonomy, model, session, extra), line: codexLine, result: codexResult },
+  claude: { args: ({ mode, autonomy, model, effort, session, extra }) => claudeArgs(mode, autonomy, model, session, extra, effort), line: claudeLine, result: claudeResult },
+  openclaude: { args: ({ mode, autonomy, model, effort, session, extra }) => claudeArgs(mode, autonomy, model, session, extra, effort), line: claudeLine, result: claudeResult },
+  codex: { args: ({ mode, autonomy, model, effort, session, extra }) => codexArgs(mode, autonomy, model, session, extra, effort), line: codexLine, result: codexResult },
   gemini: { args: ({ mode, autonomy, model, session }) => agyArgs(mode, autonomy, model, session), line: agyLine, result: agyResult,
     input: (prompt) => `${JSON.stringify({ event: 'user', message: { content: prompt } })}\n` },
 };
-// Contrato sencillo: el CLI recibe el prompt completo por stdin y devuelve texto por stdout.
-// Se ejecuta por turno sin sesión propia; cada prompt contiene el contexto del chat.
+
+const stripAnsi = (s) => String(s ?? '').replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '');
+
+// Adaptador universal para agentes del catálogo de Orca y CLIs personalizados (soporta entrega por stdin o argv).
 const customAdapter = {
-  args: ({ agent }) => agent.args,
-  result: (res) => res.code === 0 && res.stdout.trim()
-    ? { ok: true, text: res.stdout.trim() }
-    : { ok: false, error: tail(res.stderr || res.stdout) || `El CLI terminó con código ${res.code}.` },
+  args: ({ agent, model, prompt }) => {
+    const base = [...(agent.args ?? [])];
+    if (model && !base.includes('--model') && !base.includes('-m')) base.push('--model', model);
+    if (agent.delivery === 'argv') base.push(prompt);
+    return base;
+  },
+  input: (prompt, agent) => (agent?.delivery === 'argv' ? '' : prompt),
+  line: (line, _state, emit) => {
+    const clean = stripAnsi(line).trim();
+    if (!clean) return;
+    if (clean.startsWith('{')) {
+      try {
+        const j = JSON.parse(clean);
+        const txt = j.text ?? j.content ?? j.message ?? j.delta;
+        if (typeof txt === 'string' && txt.trim()) emit(short(txt));
+        return;
+      } catch { /* texto normal */ }
+    }
+    emit(short(clean));
+  },
+  result: (res) => {
+    const out = stripAnsi(res.stdout).trim();
+    return res.code === 0 && out
+      ? { ok: true, text: out }
+      : { ok: false, error: tail(stripAnsi(res.stderr || res.stdout)) || `El CLI terminó con código ${res.code}.` };
+  },
 };
 
 /** Comprueba si el CLI está instalado y, opcionalmente, si responde (consume un poco de cuota). */
 export async function checkAgent(agentId, { live = false } = {}) {
   if (!AGENTS[agentId]) throw new Error(`IA desconocida: ${agentId}`);
   if (MOCK) return { installed: true, version: 'simulación', working: live ? true : null };
-  const res = await runProcess(AGENTS[agentId].cli, ['--version'], { timeoutMs: 20_000 });
+  const res = await runProcess(AGENTS[agentId].cli, ['--version'], { timeoutMs: 12_000 });
   const installed = res.code === 0 || (AGENTS[agentId].custom && !/not recognized|not found|ENOENT/i.test(res.stderr) && res.code != null);
-  const version = installed ? (res.stdout.trim().split('\n')[0] || 'instalado') : null;
+  const version = installed ? (stripAnsi(res.stdout || res.stderr).trim().split('\n')[0] || 'instalado') : null;
   if (!installed || !live) return { installed, version, working: null };
   const probe = await invokeAgent(agentId, {
     prompt: 'Responde únicamente con la palabra OK.',

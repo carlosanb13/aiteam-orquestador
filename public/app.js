@@ -23,6 +23,7 @@ const STATUS = {
   integrating: ['Integrando', 'run'],
   attacking: ['Equipo rojo', 'run'],
   testing: ['Verificando', 'run'],
+  paused: ['En pausa', 'warn'],
   done: ['Terminado', 'ok'],
   failed: ['Error', 'err'],
   cancelled: ['Cancelado', 'err'],
@@ -31,6 +32,7 @@ const STATUS = {
 const TASK_STATUS = {
   pending: ['Pendiente', ''],
   running: ['En curso', 'run'],
+  paused: ['En pausa', 'warn'],
   done: ['Hecha', 'ok'],
   failed: ['Falló', 'err'],
   skipped: ['Omitida', 'warn'],
@@ -90,39 +92,233 @@ async function api(method, url, body) {
   return data;
 }
 
-// ------------------------------------------------------------ IAs
+// ------------------------------------------------------------ IAs y Catálogo estilo Orca
+
+state.catalog = [];
+state.defaultAgent = 'claude';
+let orcaFilter = 'all';
+let orcaQuery = '';
+let editingCmdAgentId = null;
 
 async function loadAgents(refresh = false) {
   const data = await api('GET', `/api/agents${refresh ? '?refresh' : ''}`);
   state.agents = data.agents;
+  state.defaultAgent = data.defaultAgent || 'claude';
   $('#mockBadge').hidden = !data.mock;
   renderChips();
 }
 
-$('#addAgentBtn').addEventListener('click', async () => {
-  $('#addAgentDlg').showModal();
+function renderOrcaRow(item) {
+  const editing = editingCmdAgentId === item.id;
+  const cmdText = item.displayCmd || item.command;
+  return `<div class="orca-agent-row ${item.enabled ? 'is-enabled' : ''}" data-orca-id="${esc(item.id)}">
+    <div class="orca-agent-icon" style="--agent-color:${esc(item.color || '#888')}">
+      ${emblem(item.id, 22)}
+    </div>
+    <div class="orca-agent-info">
+      <div class="orca-agent-title-line">
+        <b class="orca-agent-name">${esc(item.name)}</b>
+        ${item.isDefault ? `<span class="orca-badge-default">${icon('star', 11)} Predeterminado</span>` : item.enabled ? `<button type="button" class="orca-make-default ghost" data-orca-default="${esc(item.id)}" title="Establecer como agente predeterminado">${icon('star', 11)} Predeterminar</button>` : ''}
+        ${item.installed ? `<span class="orca-badge-installed">Instalado</span>` : ''}
+      </div>
+      ${
+        editing
+          ? `<div class="orca-cmd-editor">
+              <input type="text" class="mono small-text" data-orca-cmd-input="${esc(item.id)}" value="${esc(cmdText)}" placeholder="Comando y argumentos…" />
+              <button type="button" class="small primary" data-orca-cmd-save="${esc(item.id)}">Guardar</button>
+              <button type="button" class="small ghost" data-orca-cmd-cancel>Cancelar</button>
+            </div>`
+          : `<div class="orca-agent-cmd-row">
+              <code class="orca-agent-cmd" data-orca-edit-cmd="${esc(item.id)}" title="Clic para personalizar comando (${esc(item.tagline || item.vendor)})">${esc(cmdText)}</code>
+              <button type="button" class="orca-cmd-edit-btn ghost" data-orca-edit-cmd="${esc(item.id)}" title="Personalizar comando">${icon('edit', 12)}</button>
+            </div>`
+      }
+    </div>
+    <div class="orca-agent-controls">
+      <div class="orca-seg-toggle" role="group" aria-label="Estado de ${esc(item.name)}">
+        <button type="button" class="orca-seg-btn ${item.enabled ? 'active' : ''}" data-orca-toggle="${esc(item.id)}" data-orca-enable="1">Activado</button>
+        <button type="button" class="orca-seg-btn ${!item.enabled ? 'active' : ''}" data-orca-toggle="${esc(item.id)}" data-orca-enable="0">Desactivado</button>
+      </div>
+      <button type="button" class="orca-ext-btn ghost" data-orca-ext="${esc(item.id)}" title="${esc(item.installCmd ? `Instalar: ${item.installCmd} (o abrir web)` : `Abrir documentación de ${item.name}`)}">
+        ${icon('external', 15)}
+      </button>
+    </div>
+  </div>`;
+}
+
+function renderOrcaCatalog() {
   const box = $('#agentDiscovery');
-  box.textContent = 'Buscando herramientas instaladas…';
-  try {
-    const { candidates } = await api('GET', '/api/agents/discover');
-    box.innerHTML = `<b>Detectadas en este equipo</b><div class="discovery-items">${candidates.map((item) =>
-      `<button type="button" class="small ${item.installed ? '' : 'ghost'}" data-discovered="${esc(item.command)}" data-discovered-name="${esc(item.name)}" data-discovered-id="${esc(item.id)}" ${item.installed ? '' : 'disabled'}>${esc(item.name)} ${item.installed ? '✓' : '· no instalada'}</button>`).join('')}</div><p>Las integraciones incluidas ya están conectadas. Para otras herramientas, confirma que admiten mensajes por stdin y respuestas por stdout.</p>`;
-  } catch (err) { box.textContent = `No se pudo detectar: ${err.message}`; }
-});
-$('#agentDiscovery').addEventListener('click', (e) => {
-  const pick = e.target.closest('[data-discovered]');
-  if (!pick || !pick.dataset.discovered) return;
-  if (['claude', 'codex', 'agy'].includes(pick.dataset.discovered)) {
-    $('#agentProbeResult').textContent = 'Esta IA ya está integrada. Usa «Probar» en el panel Equipo y uso para comprobar su sesión.';
+  const form = $('#addAgentForm');
+  const body = $('#orcaAgentsBody');
+  if (!box) return;
+
+  for (const b of document.querySelectorAll('[data-orca-filter]')) {
+    b.classList.toggle('active', b.dataset.orcaFilter === orcaFilter);
+  }
+  if (orcaFilter === 'custom') {
+    body.hidden = true;
+    form.hidden = false;
     return;
   }
-  const form = $('#addAgentForm');
-  form.elements.name.value = pick.dataset.discoveredName;
-  form.elements.id.value = pick.dataset.discoveredId;
-  form.elements.command.value = pick.dataset.discovered;
-  $('#agentProbeResult').textContent = 'Indica los argumentos que usa este CLI para responder por stdin.';
+  body.hidden = false;
+  form.hidden = true;
+
+  const q = orcaQuery.toLowerCase();
+  const filtered = state.catalog.filter((item) => {
+    if (orcaFilter === 'installed' && !item.installed) return false;
+    if (orcaFilter === 'enabled' && !item.enabled) return false;
+    if (!q) return true;
+    return (
+      item.name.toLowerCase().includes(q) ||
+      item.id.toLowerCase().includes(q) ||
+      String(item.command ?? '').toLowerCase().includes(q) ||
+      String(item.vendor ?? '').toLowerCase().includes(q) ||
+      String(item.tagline ?? '').toLowerCase().includes(q)
+    );
+  });
+
+  const installedList = filtered.filter((x) => x.installed);
+  const availableList = filtered.filter((x) => !x.installed);
+
+  let html = '';
+  if (installedList.length) {
+    html += `
+      <div class="orca-sec-header">
+        <span>Instalados en este equipo</span>
+        <span class="orca-count-pill">${installedList.length} agents</span>
+      </div>
+      <div class="orca-sec-group">${installedList.map(renderOrcaRow).join('')}</div>`;
+  }
+  if (availableList.length) {
+    html += `
+      <div class="orca-sec-header">
+        <span>Disponible para instalar</span>
+        <span class="orca-count-pill">${availableList.length} agents</span>
+      </div>
+      <div class="orca-sec-group">${availableList.map(renderOrcaRow).join('')}</div>`;
+  }
+  if (!html) {
+    html = `<p class="muted" style="padding:24px;text-align:center">No se encontraron agentes para «${esc(orcaQuery)}».</p>`;
+  }
+  box.innerHTML = html;
+}
+
+async function openOrcaCatalog() {
+  $('#addAgentDlg').showModal();
+  const box = $('#agentDiscovery');
+  if (!state.catalog.length) box.innerHTML = '<p class="muted" style="padding:18px">Escaneando catálogo de agentes en tu PC…</p>';
+  try {
+    const { candidates, defaultAgent } = await api('GET', '/api/agents/discover');
+    state.catalog = candidates;
+    state.defaultAgent = defaultAgent || 'claude';
+    const badgeEl = $('#catalogCountBadge');
+    if (badgeEl) badgeEl.textContent = String(candidates.length);
+    renderOrcaCatalog();
+  } catch (err) {
+    box.innerHTML = `<p class="error" style="padding:18px">No se pudo cargar el catálogo: ${esc(err.message)}</p>`;
+  }
+}
+
+$('#addAgentBtn')?.addEventListener('click', openOrcaCatalog);
+$('#openCatalogNavBtn')?.addEventListener('click', openOrcaCatalog);
+$('#settingsOpenCatalogBtn')?.addEventListener('click', () => {
+  $('#settingsDlg')?.close();
+  openOrcaCatalog();
 });
-$('#probeAgentCommand').addEventListener('click', async () => {
+
+$('#orcaAgentSearch')?.addEventListener('input', (e) => {
+  orcaQuery = e.target.value.trim();
+  renderOrcaCatalog();
+});
+
+$('#orcaFilterPills')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-orca-filter]');
+  if (!btn) return;
+  orcaFilter = btn.dataset.orcaFilter;
+  renderOrcaCatalog();
+});
+
+$('#agentDiscovery')?.addEventListener('click', async (e) => {
+  const toggleBtn = e.target.closest('[data-orca-toggle]');
+  if (toggleBtn) {
+    const id = toggleBtn.dataset.orcaToggle;
+    const enabled = toggleBtn.dataset.orcaEnable === '1';
+    const item = state.catalog.find((x) => x.id === id);
+    if (item) item.enabled = enabled;
+    renderOrcaCatalog();
+    try {
+      await api('POST', '/api/agents/catalog', { id, enabled });
+      await loadAgents(true);
+      if (state.view === 'welcome') showWelcome();
+      if (state.view === 'new') showNew();
+    } catch (err) {
+      alert(err.message);
+    }
+    return;
+  }
+
+  const defBtn = e.target.closest('[data-orca-default]');
+  if (defBtn) {
+    const id = defBtn.dataset.orcaDefault;
+    for (const c of state.catalog) c.isDefault = c.id === id;
+    state.defaultAgent = id;
+    renderOrcaCatalog();
+    try {
+      await api('POST', '/api/agents/catalog', { id, enabled: true, makeDefault: true });
+      await loadAgents(true);
+    } catch (err) {
+      alert(err.message);
+    }
+    return;
+  }
+
+  const editBtn = e.target.closest('[data-orca-edit-cmd]');
+  if (editBtn) {
+    editingCmdAgentId = editBtn.dataset.orcaEditCmd;
+    renderOrcaCatalog();
+    document.querySelector(`[data-orca-cmd-input="${editingCmdAgentId}"]`)?.focus();
+    return;
+  }
+
+  if (e.target.closest('[data-orca-cmd-cancel]')) {
+    editingCmdAgentId = null;
+    renderOrcaCatalog();
+    return;
+  }
+
+  const saveCmdBtn = e.target.closest('[data-orca-cmd-save]');
+  if (saveCmdBtn) {
+    const id = saveCmdBtn.dataset.orcaCmdSave;
+    const inp = document.querySelector(`[data-orca-cmd-input="${id}"]`);
+    const displayCmd = inp ? inp.value.trim() : '';
+    editingCmdAgentId = null;
+    const item = state.catalog.find((x) => x.id === id);
+    if (item && displayCmd) item.displayCmd = displayCmd;
+    renderOrcaCatalog();
+    if (displayCmd) {
+      try {
+        await api('POST', '/api/agents/catalog', { id, displayCmd });
+        await loadAgents(true);
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+    return;
+  }
+
+  const extBtn = e.target.closest('[data-orca-ext]');
+  if (extBtn) {
+    const id = extBtn.dataset.orcaExt;
+    const item = state.catalog.find((x) => x.id === id);
+    if (!item) return;
+    if (item.installCmd && !item.installed) {
+      navigator.clipboard?.writeText(item.installCmd).catch(() => {});
+    }
+    if (item.url) window.open(item.url, '_blank', 'noopener');
+  }
+});
+
+$('#probeAgentCommand')?.addEventListener('click', async () => {
   const command = $('#addAgentForm').elements.command.value.trim();
   const label = $('#agentProbeResult');
   label.textContent = 'Comprobando…';
@@ -131,8 +327,11 @@ $('#probeAgentCommand').addEventListener('click', async () => {
     label.textContent = result.installed ? `Instalado: ${result.version}` : 'No se encontró en PATH.';
   } catch (err) { label.textContent = err.message; }
 });
-$('#cancelAddAgent').addEventListener('click', () => $('#addAgentDlg').close());
-$('#addAgentForm').addEventListener('submit', async (e) => {
+$('#cancelAddAgent')?.addEventListener('click', () => {
+  orcaFilter = 'all';
+  renderOrcaCatalog();
+});
+$('#addAgentForm')?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const form = e.currentTarget;
   const data = new FormData(form);
@@ -147,10 +346,11 @@ $('#addAgentForm').addEventListener('submit', async (e) => {
       profile: data.get('profile'),
     });
     await loadAgents(true);
-    $('#addAgentDlg').close();
     form.reset();
+    orcaFilter = 'all';
+    await openOrcaCatalog();
     if (state.view === 'new') showNew();
-    if (state.view === 'newChat') showNewChat();
+    if (state.view === 'welcome') showWelcome();
   } catch (err) {
     error.textContent = err.message;
     error.hidden = false;
@@ -204,8 +404,9 @@ function showNew(repo) {
   goal.insertAdjacentElement('afterend', goalMic);
   attachDictation(goal, goalMic);
 
-  const lastRepo = typeof repo === 'string' ? repo : localStorage.getItem('aiteam.repo');
+  const lastRepo = typeof repo === 'string' ? repo : (localStorage.getItem('aiteam.repo') || state.projects[0]?.path || '');
   if (lastRepo) $('[name=repoPath]').value = lastRepo;
+  attachFolderPicker($('#newRunForm'), $('[name=repoPath]'));
 
   $('[data-agent-pick]').innerHTML = agentPickHtml();
   fillLevelSelects($('#newRunForm'));
@@ -239,6 +440,8 @@ function showNew(repo) {
     btn.disabled = true;
     $('#formError').hidden = true;
     try {
+      await api('POST', '/api/projects', { path: body.repoPath, prepare: true });
+      await loadProjects();
       localStorage.setItem('aiteam.repo', body.repoPath);
       const run = await api('POST', '/api/runs', body);
       await loadRuns();
@@ -413,8 +616,8 @@ function renderRun() {
             : ''
         }
       </section>`
-      : run.status === 'interrupted'
-        ? `<section class="panel run-outcome"><h3>Trabajo interrumpido</h3><p>Las subtareas terminadas y sus ramas siguen guardadas. Puedes continuar desde ellas o empezar otra tarea.</p>${!run.cleaned ? '<button id="resumeRun" class="primary">Reanudar trabajo</button> ' : ''}<button id="retryRun">Empezar de nuevo</button></section>`
+      : (run.status === 'interrupted' || run.status === 'paused')
+        ? `<section class="panel run-outcome"><h3>${run.status === 'paused' ? '⏸ Trabajo en pausa' : 'Trabajo interrumpido'}</h3><p>${run.status === 'paused' ? 'Las subtareas terminadas y sus ramas siguen guardadas intactas. Puedes continuar cuando lo desees.' : 'Las subtareas terminadas y sus ramas siguen guardadas. Puedes continuar desde ellas o empezar otra tarea.'}</p>${!run.cleaned ? `<button id="resumeRun" class="primary">${icon('play', 13)} Reanudar trabajo</button> ` : ''}<button id="retryRun">Empezar de nuevo</button></section>`
         : '';
 
   $('#main').innerHTML = `
@@ -428,8 +631,9 @@ function renderRun() {
           ${badge(STATUS[run.status] ?? [run.status, ''])}
           ${awaiting ? '<button class="primary" id="approveBtn">Aprobar reparto y empezar</button>' : ''}
           <button id="runFiles">Archivos</button>
-          ${active ? '<button class="danger" id="cancelBtn">Cancelar</button>' : ''}
-          ${!active && Object.keys(run.worktrees).length && !run.cleaned ? '<button id="cleanupBtn" title="Borra las carpetas de trabajo; las ramas se conservan">Limpiar copias</button>' : ''}
+          ${active ? `<button class="warn" id="pauseBtn" title="Pausar la tarea temporalmente">${icon('pause', 13)} Pausar</button><button class="danger" id="cancelBtn" title="Cancelar la tarea">${icon('stop', 13)} Cancelar</button>` : ''}
+          ${(run.status === 'paused' || run.status === 'interrupted') && !run.cleaned ? `<button class="primary" id="resumeRunTopBtn" title="Reanudar el trabajo del equipo">${icon('play', 13)} Reanudar</button>` : ''}
+          ${!active && run.status !== 'paused' && Object.keys(run.worktrees).length && !run.cleaned ? '<button id="cleanupBtn" title="Borra las carpetas de trabajo; las ramas se conservan">Limpiar copias</button>' : ''}
         </div>
       </div>
       <div class="pipeline">${STEPS.map(([k, label]) => `<div class="step ${stepClass(run, k)}">${label}</div>`).join('')}</div>
@@ -476,6 +680,14 @@ function renderRun() {
   $('#retryRun')?.addEventListener('click', () => retryTeamRun(run));
   $('#resumeRun')?.addEventListener('click', async () => {
     try { await api('POST', `/api/runs/${run.id}/resume`); await openRun(run.id); }
+    catch (err) { alert(err.message); }
+  });
+  $('#resumeRunTopBtn')?.addEventListener('click', async () => {
+    try { await api('POST', `/api/runs/${run.id}/resume`); await openRun(run.id); }
+    catch (err) { alert(err.message); }
+  });
+  $('#pauseBtn')?.addEventListener('click', async () => {
+    try { await api('POST', `/api/runs/${run.id}/pause`); await openRun(run.id); }
     catch (err) { alert(err.message); }
   });
   $('#runFiles')?.addEventListener('click', () =>
@@ -569,28 +781,286 @@ events.addEventListener('log', (e) => {
   appendLog(entry);
 });
 
-// ------------------------------------------------------------ ajustes
+// ------------------------------------------------------------ ajustes (estilo Orca)
+
+const PROVIDER_LOGIN_HINTS = {
+  claude: { provider: 'Anthropic', loginCmd: 'claude login' },
+  codex: { provider: 'OpenAI', loginCmd: 'codex login' },
+  gemini: { provider: 'Google', loginCmd: 'gemini' },
+  copilot: { provider: 'GitHub', loginCmd: 'gh auth login' },
+  cursor: { provider: 'Anysphere', loginCmd: 'cursor-agent login' },
+  opencode: { provider: 'SST', loginCmd: 'opencode auth login' },
+};
+
+function selectSettingsTab(tabId) {
+  for (const b of document.querySelectorAll('[data-settings-tab]')) {
+    b.classList.toggle('active', b.dataset.settingsTab === tabId);
+  }
+  for (const p of document.querySelectorAll('[data-settings-pane]')) {
+    p.hidden = p.dataset.settingsPane !== tabId;
+  }
+  if (tabId === 'usage') renderSettingsUsagePane();
+}
+
+$('#settingsNav')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-settings-tab]');
+  if (btn) selectSettingsTab(btn.dataset.settingsTab);
+});
+
+$('#closeSettingsX')?.addEventListener('click', () => $('#settingsDlg').close());
+$('#cancelSettingsBtn')?.addEventListener('click', () => $('#settingsDlg').close());
+$('#closeAddAgentX')?.addEventListener('click', () => $('#addAgentDlg').close());
+
+// Cerrar cualquier diálogo al hacer clic fuera de la ventana (en el fondo oscuro).
+document.addEventListener('click', (e) => {
+  if (e.target.tagName === 'DIALOG' && e.target.open) {
+    const r = e.target.getBoundingClientRect();
+    const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    if (!inside) e.target.close();
+  }
+});
+
+function renderProviderAccounts() {
+  const box = $('#providerAccountsList');
+  if (!box) return;
+  const activeProviders = state.agents.filter((a) => a.enabled !== false);
+  box.innerHTML = activeProviders
+    .map((a) => {
+      const hint = PROVIDER_LOGIN_HINTS[a.id] ?? { provider: a.vendor || 'CLI', loginCmd: `${a.cli || a.id} --help` };
+      const statusText = !a.installed ? 'CLI no instalado' : a.working === false ? 'Requiere iniciar sesión' : 'Cuenta conectada';
+      const statusCls = !a.installed || a.working === false ? 'err' : 'ok';
+      return `<div class="provider-acc-card">
+        <div class="provider-acc-left">
+          ${emblem(a.id, 22)}
+          <div>
+            <div class="provider-acc-title"><b>${esc(a.name)}</b> <span class="muted small-text">· ${esc(hint.provider)}</span></div>
+            <div class="muted small-text mono">Autenticación: <code>${esc(hint.loginCmd)}</code></div>
+          </div>
+        </div>
+        <div class="provider-acc-right">
+          <span class="agent-state-pill ${statusCls}">${statusText}</span>
+          <button type="button" class="small ghost" data-copy-login="${esc(hint.loginCmd)}" title="Copiar comando de login">${icon('copy', 12)} Login</button>
+          <button type="button" class="small" data-verify-provider="${esc(a.id)}" ${a.installed ? '' : 'disabled'}>Verificar</button>
+        </div>
+      </div>`;
+    })
+    .join('');
+}
+
+$('#providerAccountsList')?.addEventListener('click', async (e) => {
+  const copyBtn = e.target.closest('[data-copy-login]');
+  if (copyBtn) {
+    navigator.clipboard.writeText(copyBtn.dataset.copyLogin);
+    const prev = copyBtn.innerHTML;
+    copyBtn.textContent = 'Copiado';
+    setTimeout(() => (copyBtn.innerHTML = prev), 1400);
+    return;
+  }
+  const verifyBtn = e.target.closest('[data-verify-provider]');
+  if (verifyBtn) {
+    const id = verifyBtn.dataset.verifyProvider;
+    verifyBtn.disabled = true;
+    verifyBtn.textContent = 'Probando…';
+    try {
+      Object.assign(agentInfo(id), await api('POST', `/api/agents/${id}/test`));
+    } catch (err) {
+      Object.assign(agentInfo(id), { working: false, error: err.message });
+    }
+    renderProviderAccounts();
+    renderTeam();
+  }
+});
+
+function renderSettingsUsagePane() {
+  const kpi = $('#settingsStatsSummary');
+  const metersBox = $('#settingsUsageMeters');
+  if (!kpi || !metersBox) return;
+  const enabledAgents = state.agents.filter((a) => a.enabled !== false);
+  const installedCount = enabledAgents.filter((a) => a.installed).length;
+  const totalCallsToday = Object.values(state.usage ?? {}).reduce((acc, u) => acc + (u?.callsToday || 0), 0);
+  kpi.innerHTML = `
+    <div class="stat-kpi-box"><span class="stat-kpi-val">${installedCount}/${enabledAgents.length}</span><span class="stat-kpi-lbl">Agentes listos</span></div>
+    <div class="stat-kpi-box"><span class="stat-kpi-val">${state.chats?.length ?? 0}</span><span class="stat-kpi-lbl">Conversaciones</span></div>
+    <div class="stat-kpi-box"><span class="stat-kpi-val">${state.runs?.length ?? 0}</span><span class="stat-kpi-lbl">Tareas en paralelo</span></div>
+    <div class="stat-kpi-box"><span class="stat-kpi-val">${totalCallsToday}</span><span class="stat-kpi-lbl">Consultas hoy</span></div>
+  `;
+  metersBox.innerHTML = enabledAgents
+    .map((a) => {
+      const u = state.usage?.[a.id];
+      const rows = u && (u.session || u.weekly)
+        ? meter('Ventana 5 horas', u.session) + meter('Ventana semanal', u.weekly)
+        : `<div class="muted small-text">${u?.callsToday ? `${u.callsToday} consultas hoy · ` : ''}Límites gestionados directamente por el CLI (${esc(a.cli || a.id)})</div>`;
+      return `<div class="settings-usage-card">
+        <div class="settings-usage-head">
+          ${emblem(a.id, 18)}
+          <b style="color:${a.color}">${esc(a.name)}</b>
+          <span class="muted small-text">${u?.callsToday ? `${u.callsToday} turnos hoy` : ''}</span>
+        </div>
+        ${rows}
+      </div>`;
+    })
+    .join('');
+}
+
+$('#settingsRefreshUsageBtn')?.addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  btn.textContent = 'Actualizando…';
+  try {
+    state.usage = await api('POST', '/api/usage/refresh');
+    renderTeam();
+    renderSettingsUsagePane();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Actualizar cuotas';
+  }
+});
+
+$('#settingsOpenCmdPaletteBtn')?.addEventListener('click', () => {
+  $('#settingsDlg')?.close();
+  openCmdPalette();
+});
+
+$('#settingsScanPortsBtn')?.addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  const statusEl = $('#settingsPortsStatus');
+  btn.disabled = true;
+  try {
+    const { ports } = await api('GET', '/api/ports');
+    if (statusEl) {
+      statusEl.innerHTML = ports?.length
+        ? `Puertos activos detectados: ${ports.map((p) => `<code>${esc(p.url)}</code>`).join(', ')}`
+        : 'No se detectaron servidores locales activos en este momento.';
+    }
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$('#uiDensitySel')?.addEventListener('change', (e) => {
+  document.documentElement.dataset.density = e.target.value;
+  localStorage.setItem('aiteam.density', e.target.value);
+});
+if (localStorage.getItem('aiteam.density')) {
+  document.documentElement.dataset.density = localStorage.getItem('aiteam.density');
+}
 
 $('#settingsBtn').addEventListener('click', async () => {
-  const cfg = await api('GET', '/api/config');
+  const [cfg, appInfo] = await Promise.all([api('GET', '/api/config'), api('GET', '/api/app').catch(() => null)]);
+  state.config = cfg;
   const form = $('#settingsForm');
   fillLevelSelects(form);
   form.autonomy.value = cfg.autonomy;
   form.autonomy.onchange?.();
-  form.taskTimeoutMinutes.value = cfg.taskTimeoutMinutes;
-  form.maxFixRounds.value = cfg.maxFixRounds;
+  form.taskTimeoutMinutes.value = cfg.taskTimeoutMinutes ?? 30;
+  form.maxFixRounds.value = cfg.maxFixRounds ?? 1;
+
+  // Coordinadora y Orquestación
+  const coordSel = $('#settingsCoordinatorSel');
+  if (coordSel) {
+    const defCoord = cfg.orchestration?.defaultCoordinator || cfg.defaultAgent || 'claude';
+    coordSel.innerHTML = state.agents
+      .filter((a) => a.enabled !== false)
+      .map((a) => `<option value="${esc(a.id)}" ${a.id === defCoord ? 'selected' : ''}>${esc(a.name)}</option>`)
+      .join('');
+  }
+  form.orchCrossReview.checked = cfg.orchestration?.crossReview !== false;
+  form.orchAdversarial.checked = Boolean(cfg.orchestration?.adversarial);
+  form.orchAutoApprove.checked = cfg.orchestration?.autoApprove !== false;
+
+  // Compactación
+  form.compactionEnabled.checked = cfg.compaction?.enabled !== false;
+  form.compactionThreshold.value = cfg.compaction?.thresholdChars ?? 60000;
+  form.compactionKeepRecent.value = cfg.compaction?.keepRecent ?? 12;
+
+  // Git
+  form.gitAutoInit.checked = cfg.git?.autoInit !== false;
+  form.gitAutoClean.checked = Boolean(cfg.git?.autoCleanWorktrees);
+  form.gitBranchPrefix.value = cfg.git?.branchPrefix ?? 'aiteam/';
+
+  // Skills y Reglas
+  form.projectRulesEnabled.checked = cfg.projectRules?.enabled !== false;
+  form.projectRulesMaxChars.value = cfg.projectRules?.maxChars ?? 20000;
+  const recipesBox = $('#settingsRecipesList');
+  if (recipesBox && typeof TEAM_RECIPES !== 'undefined') {
+    recipesBox.innerHTML = TEAM_RECIPES.map(
+      (r, idx) => `<div class="settings-recipe-item">
+        <div>
+          <b>${esc(r.title)}</b>
+          <div class="muted small-text">${esc(r.subtitle)}</div>
+        </div>
+        <button type="button" class="small ghost" data-run-settings-recipe="${idx}">Usar receta</button>
+      </div>`,
+    ).join('');
+  }
+
+  // Terminal y Web Preview
+  form.defaultPreviewUrl.value = cfg.editor?.defaultPreviewUrl || localStorage.getItem('aiteam.previewUrl') || 'http://localhost:3000';
+
+  // Entrada y Apariencia
+  form.sendWithEnter.checked = cfg.editor?.sendWithEnter !== false;
+  form.spellcheck.checked = cfg.editor?.spellcheck !== false;
+  if ($('#uiDensitySel')) {
+    $('#uiDensitySel').value = localStorage.getItem('aiteam.density') || cfg.editor?.density || 'comfortable';
+  }
+
+  // Info del servidor y Rollback
+  const srvInfo = $('#settingsServerInfo');
+  if (srvInfo && appInfo) {
+    srvInfo.innerHTML = `Carpeta raíz: ${esc(appInfo.root)} · PID: ${esc(appInfo.pid)} · Commit: ${esc((appInfo.head ?? '').slice(0, 8) || 'local')}`;
+  }
+  const rbCard = $('#settingsRollbackCard');
+  if (rbCard) {
+    if (appInfo?.rollback?.commit) {
+      rbCard.hidden = false;
+      const rbDesc = $('#settingsRollbackDesc');
+      if (rbDesc) rbDesc.textContent = `Punto de restauración guardado: ${new Date(appInfo.rollback.timestamp).toLocaleString()}`;
+      const rbDetails = $('#settingsRollbackDetails');
+      if (rbDetails) rbDetails.innerHTML = `Commit: <code>${esc(appInfo.rollback.commit.slice(0, 8))}</code> ${appInfo.rollback.label ? `· ${esc(appInfo.rollback.label)}` : ''}`;
+    } else {
+      rbCard.hidden = true;
+    }
+  }
+
+  renderProviderAccounts();
+  renderSettingsUsagePane();
+
   $('#agentSettings').innerHTML = state.agents
     .map((a) => {
       const c = cfg.agents[a.id] ?? {};
-      return `<div class="agent-setting" data-agent="${a.id}">
-        <label class="check"><input type="checkbox" data-k="enabled" ${c.enabled !== false ? 'checked' : ''} /> <b style="color:${a.color}">${esc(a.name)}</b> <span class="muted">${esc(a.vendor)}</span></label>
-        <label ${a.custom ? 'hidden' : ''}><span>Modelo <em class="muted">(vacío = el predeterminado del CLI)</em></span><input data-k="model" value="${esc(c.model ?? '')}" /></label>
-        <label><span>En qué destaca (lo leen las demás IAs al negociar)</span><textarea data-k="profile" rows="2">${esc(c.profile ?? '')}</textarea></label>
-        <div class="caps"><span class="muted small-text">Además de programar, puede:</span>${Object.entries(CAP_LABELS).map(([cap, label]) => `<label class="check"><input type="checkbox" data-cap="${cap}" ${(c.capabilities ?? []).includes(cap) ? 'checked' : ''} /> ${esc(CAP_TITLES[cap])}</label>`).join('')}</div>
+      const statusText = !a.installed ? 'No instalada' : a.working === false ? 'Sin sesión' : 'Instalada';
+      const statusCls = !a.installed || a.working === false ? 'err' : 'ok';
+      return `<div class="agent-setting settings-card" data-agent="${a.id}">
+        <div class="agent-setting-head">
+          <label class="check agent-enable-label">
+            <input type="checkbox" data-k="enabled" ${c.enabled !== false ? 'checked' : ''} />
+            ${emblem(a.id, 20)}
+            <b style="color:${a.color}">${esc(a.name)}</b>
+            <span class="muted small-text">${esc(a.vendor)}</span>
+          </label>
+          <span class="agent-state-pill ${statusCls}">${statusText}</span>
+        </div>
+        <label class="form-label" ${a.custom ? 'hidden' : ''}>
+          <span>Modelo <em class="muted">(vacío = el predeterminado del CLI)</em></span>
+          <input data-k="model" placeholder="Automático del CLI" value="${esc(c.model ?? '')}" />
+        </label>
+        <label class="form-label">
+          <span>En qué destaca <em class="muted">(lo leen las demás IAs al repartirse el trabajo)</em></span>
+          <textarea data-k="profile" rows="2">${esc(c.profile ?? '')}</textarea>
+        </label>
+        <div class="caps"><span class="muted small-text">Capacidades extra (Computer Use / Imágenes):</span>${Object.entries(CAP_LABELS).map(([cap]) => `<label class="check"><input type="checkbox" data-cap="${cap}" ${(c.capabilities ?? []).includes(cap) ? 'checked' : ''} /> ${esc(CAP_TITLES[cap])}</label>`).join('')}</div>
       </div>`;
     })
     .join('');
   $('#settingsDlg').showModal();
+});
+
+$('#settingsRecipesList')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-run-settings-recipe]');
+  if (!btn) return;
+  const r = TEAM_RECIPES[Number(btn.dataset.runSettingsRecipe)];
+  $('#settingsDlg')?.close();
+  if (r) runTeamRecipe(r);
 });
 
 $('#saveSettings').addEventListener('click', async (e) => {
@@ -605,16 +1075,52 @@ $('#saveSettings').addEventListener('click', async (e) => {
       capabilities: [...box.querySelectorAll('[data-cap]:checked')].map((x) => x.dataset.cap),
     };
   }
-  await api('PUT', '/api/config', {
+  const density = $('#uiDensitySel')?.value || 'comfortable';
+  document.documentElement.dataset.density = density;
+  localStorage.setItem('aiteam.density', density);
+  if (form.defaultPreviewUrl.value.trim()) {
+    localStorage.setItem('aiteam.previewUrl', form.defaultPreviewUrl.value.trim());
+  }
+
+  const payload = {
     autonomy: form.autonomy.value,
     taskTimeoutMinutes: Number(form.taskTimeoutMinutes.value) || 30,
     maxFixRounds: Number(form.maxFixRounds.value) || 0,
+    orchestration: {
+      defaultCoordinator: form.defaultCoordinator?.value || 'claude',
+      crossReview: form.orchCrossReview.checked,
+      adversarial: form.orchAdversarial.checked,
+      autoApprove: form.orchAutoApprove.checked,
+    },
+    compaction: {
+      enabled: form.compactionEnabled.checked,
+      thresholdChars: Number(form.compactionThreshold.value) || 60000,
+      keepRecent: Number(form.compactionKeepRecent.value) || 12,
+    },
+    git: {
+      autoInit: form.gitAutoInit.checked,
+      autoCleanWorktrees: form.gitAutoClean.checked,
+      branchPrefix: form.gitBranchPrefix.value.trim() || 'aiteam/',
+    },
+    projectRules: {
+      enabled: form.projectRulesEnabled.checked,
+      maxChars: Number(form.projectRulesMaxChars.value) || 20000,
+    },
+    editor: {
+      sendWithEnter: form.sendWithEnter.checked,
+      spellcheck: form.spellcheck.checked,
+      density,
+      defaultPreviewUrl: form.defaultPreviewUrl.value.trim() || 'http://localhost:3000',
+    },
     agents,
-  });
+  };
+  const saved = await api('PUT', '/api/config', payload);
+  state.config = saved;
+  state.defaultAutonomy = saved.autonomy ?? form.autonomy.value;
   $('#settingsDlg').close();
   await loadAgents();
   if (state.view === 'new') showNew();
-  if (state.view === 'newChat') showNewChat();
+  if (state.view === 'welcome') showWelcome();
 });
 
 // ------------------------------------------------------------ conversaciones (chat de equipo)
@@ -632,38 +1138,767 @@ function renderChatList() {
   renderSidebar();
 }
 
-function showNewChat() {
-  state.view = 'newChat';
+function attachFolderPicker(root, input, onPick) {
+  const btn = root?.querySelector('[data-pick-folder]');
+  if (!btn || !input) return;
+  btn.addEventListener('click', async () => {
+    const prev = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `${icon('folder', 14)} Abriendo…`;
+    try {
+      const res = await api('POST', '/api/projects/pick');
+      if (res.path) {
+        input.value = res.path;
+        localStorage.setItem('aiteam.repo', res.path);
+        const hint = root.querySelector('[data-folder-hint]');
+        if (hint) {
+          hint.hidden = !res.needs;
+          hint.textContent = res.needs === 'git'
+            ? 'Esta carpeta aún no tiene git: AITeam la inicializará automáticamente al continuar.'
+            : res.needs === 'commit'
+              ? 'Este repositorio aún no tiene un primer commit: AITeam creará un punto de partida automáticamente.'
+              : '';
+        }
+        onPick?.(res.path);
+      }
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = prev;
+    }
+  });
+}
+
+const MODEL_OPTIONS = [
+  ['', 'Modelo: Automático'],
+  ['claude-opus-4-6', 'Claude Opus 4.6'],
+  ['claude-sonnet-4-6', 'Claude Sonnet 4.6'],
+  ['claude-haiku-4-5', 'Claude Haiku 4.5'],
+  ['gpt-5.4', 'GPT-5.4 (Codex)'],
+  ['o3', 'OpenAI o3'],
+  ['gemini-2.5-pro', 'Gemini 2.5 Pro'],
+  ['gemini-2.5-flash', 'Gemini 2.5 Flash'],
+];
+
+const EFFORT_OPTIONS = [
+  ['auto', 'Esfuerzo: Auto'],
+  ['low', 'Esfuerzo: Bajo'],
+  ['medium', 'Esfuerzo: Medio'],
+  ['high', 'Esfuerzo: Alto'],
+  ['max', 'Esfuerzo: Máximo'],
+];
+
+/**
+ * Conecta soporte de adjuntar imágenes (clic, pegar con Ctrl+V y arrastrar/soltar) a un compositor.
+ */
+function setupComposerAttachments({ boxEl, inputEl, stripEl, btnEl, fileInputEl }) {
+  const list = [];
+  const render = () => {
+    if (!stripEl) return;
+    stripEl.hidden = list.length === 0;
+    stripEl.innerHTML = list
+      .map(
+        (item, idx) => `<div class="attach-thumb" title="${esc(item.name)}">
+          <img src="${item.dataUrl}" alt="${esc(item.name)}" />
+          <span class="attach-name">${esc(item.name)}</span>
+          <button type="button" class="attach-remove" data-rm-attach="${idx}" title="Quitar imagen">${icon('close', 11)}</button>
+        </div>`,
+      )
+      .join('');
+  };
+
+  const addFiles = (fileList) => {
+    for (const file of fileList ?? []) {
+      if (!file.type?.startsWith('image/')) continue;
+      if (list.length >= 6) break;
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          list.push({ name: file.name || `captura-${Date.now()}.png`, dataUrl: reader.result });
+          render();
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  btnEl?.addEventListener('click', () => fileInputEl?.click());
+  fileInputEl?.addEventListener('change', () => {
+    addFiles(fileInputEl.files);
+    fileInputEl.value = '';
+  });
+  stripEl?.addEventListener('click', (e) => {
+    const rm = e.target.closest('[data-rm-attach]');
+    if (!rm) return;
+    list.splice(Number(rm.dataset.rmAttach), 1);
+    render();
+  });
+  inputEl?.addEventListener('paste', (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const imgs = [];
+    for (const it of items) {
+      if (it.type?.startsWith('image/')) {
+        const f = it.getAsFile();
+        if (f) imgs.push(f);
+      }
+    }
+    if (imgs.length) {
+      e.preventDefault();
+      addFiles(imgs);
+    }
+  });
+  if (boxEl) {
+    boxEl.addEventListener('dragover', (e) => {
+      if ([...(e.dataTransfer?.items ?? [])].some((i) => i.type?.startsWith('image/'))) {
+        e.preventDefault();
+        boxEl.classList.add('drag-over');
+      }
+    });
+    boxEl.addEventListener('dragleave', () => boxEl.classList.remove('drag-over'));
+    boxEl.addEventListener('drop', (e) => {
+      boxEl.classList.remove('drag-over');
+      const imgs = [...(e.dataTransfer?.files ?? [])].filter((f) => f.type?.startsWith('image/'));
+      if (imgs.length) {
+        e.preventDefault();
+        addFiles(imgs);
+      }
+    });
+  }
+
+  return {
+    get items() {
+      return list.slice();
+    },
+    clear() {
+      list.length = 0;
+      render();
+    },
+  };
+}
+
+// ---------------------------------------------------------------- Autocomplete de menciones (@) y comandos (/)
+function setupComposerAutocomplete({ boxEl, inputEl, isWelcome = false }) {
+  if (!boxEl || !inputEl) return;
+
+  let menuEl = boxEl.querySelector('.composer-autocomplete-menu');
+  if (menuEl) menuEl.remove();
+
+  menuEl = document.createElement('div');
+  menuEl.className = 'composer-autocomplete-menu';
+  menuEl.hidden = true;
+  boxEl.appendChild(menuEl);
+
+  let activeIndex = 0;
+  let currentItems = [];
+  let currentMode = null; // 'mention' | 'slash'
+  let tokenStart = -1;
+
+  function hide() {
+    menuEl.hidden = true;
+    menuEl.innerHTML = '';
+    currentItems = [];
+    currentMode = null;
+    tokenStart = -1;
+  }
+
+  function getMentionItems(query) {
+    const list = [
+      {
+        type: 'mention',
+        token: '@equipo',
+        label: 'Todo el equipo',
+        desc: 'Todas las IAs analizan y colaboran por turno',
+        badge: 'Equipo',
+        iconHtml: icon('users', 16),
+      },
+      {
+        type: 'mention',
+        token: '@paralelo',
+        label: 'Tarea en paralelo',
+        desc: 'Divide y ejecuta tareas independientes a la vez',
+        badge: 'Paralelo',
+        iconHtml: icon('bolt', 16),
+      },
+    ];
+
+    const currentChatAgents = new Set(state.chat?.agents ?? []);
+    for (const a of state.agents) {
+      const handle = `@${a.handle || a.id}`;
+      const inChat = currentChatAgents.has(a.id);
+      list.push({
+        type: 'mention',
+        token: handle,
+        label: a.name,
+        desc: a.tagline || a.vendor || (a.installed ? 'Instalada' : 'Configurar'),
+        badge: inChat ? 'En chat' : a.installed ? 'Instalada' : 'CLI',
+        iconHtml: emblem(a.id, 16),
+        installed: a.installed,
+        inChat,
+      });
+    }
+
+    if (!query) return list;
+    return list.filter((it) =>
+      it.token.toLowerCase().includes(query) ||
+      it.label.toLowerCase().includes(query) ||
+      (it.desc && it.desc.toLowerCase().includes(query))
+    );
+  }
+
+  function getSlashItems(query) {
+    const list = [
+      // Modos y Orquestación
+      {
+        token: '/plan',
+        label: 'Modo Planificar',
+        desc: 'Solo lectura: discute arquitectura y planes antes de tocar código',
+        badge: 'Modo',
+        iconHtml: icon('list', 16),
+      },
+      {
+        token: '/build',
+        label: 'Modo Construir',
+        desc: 'Modo estándar: permite a las IAs editar y crear archivos',
+        badge: 'Modo',
+        iconHtml: icon('hammer', 16),
+      },
+      {
+        token: '/equipo',
+        label: 'Lanzar Tarea de Equipo',
+        desc: 'Planifica, reparte subtareas en paralelo y revisa código',
+        badge: 'Orquestación',
+        iconHtml: icon('users', 16),
+      },
+      {
+        token: '/compact',
+        label: 'Compactar Contexto',
+        desc: 'Resume turnos antiguos para aligerar tokens y memoria',
+        badge: 'Contexto',
+        iconHtml: icon('archive', 16),
+      },
+      // Control de ejecución
+      {
+        token: '/pausar',
+        label: 'Pausar Tarea',
+        desc: 'Pausa el turno o la tarea de equipo en curso',
+        badge: 'Control',
+        iconHtml: icon('pause', 16),
+        action: () => {
+          if (state.chat?.working) api('POST', `/api/chats/${state.chat.id}/pause`).catch((err) => alert(err.message));
+          else if (state.current?.status && ['planning', 'bidding', 'running', 'reviewing', 'integrating', 'attacking', 'testing'].includes(state.current.status)) {
+            api('POST', `/api/runs/${state.current.id}/pause`).catch((err) => alert(err.message));
+          }
+        },
+      },
+      {
+        token: '/reanudar',
+        label: 'Reanudar Tarea',
+        desc: 'Continúa el trabajo pausado o los turnos pendientes',
+        badge: 'Control',
+        iconHtml: icon('play', 16),
+        action: () => {
+          if (state.chat && (state.chat.paused || state.chat.pendingTurns?.length)) {
+            api('POST', `/api/chats/${state.chat.id}/resume`).catch((err) => alert(err.message));
+          } else if (state.current && ['paused', 'interrupted'].includes(state.current.status)) {
+            api('POST', `/api/runs/${state.current.id}/resume`).then(() => openRun(state.current.id)).catch((err) => alert(err.message));
+          }
+        },
+      },
+      // Herramientas y Extensiones
+      {
+        token: '/mcp',
+        label: 'Extensiones MCP',
+        desc: 'Conectar y gestionar servidores MCP (HTTPS / Claude / Codex)',
+        badge: 'Extensiones',
+        iconHtml: icon('puzzle', 16),
+        action: () => {
+          if (state.chat) openChatTools('extensions');
+          else $('#settingsBtn')?.click();
+        },
+      },
+      {
+        token: '/skills',
+        label: 'Skills y Comandos',
+        desc: 'Explorar o crear skills reutilizables (.aiteam/commands)',
+        badge: 'Skills',
+        iconHtml: icon('command', 16),
+        action: () => {
+          if (state.chat) openChatTools('commands');
+          else openCmdPalette();
+        },
+      },
+      {
+        token: '/terminal',
+        label: 'Terminal de Proyecto',
+        desc: 'Ejecutar comandos en la copia de trabajo aislada',
+        badge: 'Terminal',
+        iconHtml: icon('terminal', 16),
+        action: () => {
+          if (state.chat) openChatTools('terminal');
+        },
+      },
+      {
+        token: '/versiones',
+        label: 'Control de Versiones (Snapshots)',
+        desc: 'Deshacer o restaurar turnos anteriores de las IAs',
+        badge: 'Snapshots',
+        iconHtml: icon('clock', 16),
+        action: () => {
+          if (state.chat) openChatTools('snapshots');
+        },
+      },
+      {
+        token: '/preview',
+        label: 'Vista Previa Web',
+        desc: 'Navegador interno y detector de puertos de dev server',
+        badge: 'Web',
+        iconHtml: icon('globe', 16),
+        action: () => togglePreviewPanel(),
+      },
+      {
+        token: '/archivos',
+        label: 'Explorador de Archivos',
+        desc: 'Ver archivos del proyecto o de la copia activa',
+        badge: 'Archivos',
+        iconHtml: icon('folder', 16),
+        action: () => {
+          const p = state.chat?.worktree?.path || state.chat?.repoPath || localStorage.getItem('aiteam.repo');
+          if (p) openFiles(p);
+        },
+      },
+      {
+        token: '/recetas',
+        label: 'Paleta de Recetas',
+        desc: 'Ejecutar recetas rápidas de equipo (Ctrl+K)',
+        badge: 'Recetas',
+        iconHtml: icon('zap', 16),
+        action: () => openCmdPalette(),
+      },
+      {
+        token: '/rollback',
+        label: 'Rollback Inmediato',
+        desc: 'Deshacer en 1 clic la última auto-mejora si algo falla',
+        badge: 'Seguridad',
+        iconHtml: icon('refresh', 16),
+        action: () => {
+          $('#settingsRollbackBtn')?.click() || $('#settingsBtn')?.click();
+        },
+      },
+      {
+        token: '/doctor',
+        label: 'Doctor y Diagnóstico',
+        desc: 'Diagnosticar estado de agentes, sesión y CLI',
+        badge: 'Salud',
+        iconHtml: icon('heart', 16),
+        action: () => openHelpModal(),
+      },
+      {
+        token: '/ayuda',
+        label: 'Ayuda y Atajos',
+        desc: 'Ver guía de uso y atajos de teclado',
+        badge: 'Guía',
+        iconHtml: icon('help', 16),
+        action: () => openHelpModal(),
+      },
+    ];
+
+    if (!query) return list;
+    return list.filter((it) =>
+      it.token.toLowerCase().includes(query) ||
+      it.label.toLowerCase().includes(query) ||
+      (it.desc && it.desc.toLowerCase().includes(query))
+    );
+  }
+
+  function renderList() {
+    if (!currentItems.length) {
+      hide();
+      return;
+    }
+    if (activeIndex >= currentItems.length) activeIndex = 0;
+    if (activeIndex < 0) activeIndex = currentItems.length - 1;
+
+    const title = currentMode === 'mention' ? 'Mencionar IA o equipo (@)' : 'Comandos y herramientas (/)';
+    const hint = '↑↓ para navegar · Intro para elegir · Esc para cerrar';
+
+    menuEl.innerHTML = `
+      <div class="ac-head">
+        <span>${title}</span>
+        <span class="ac-hint">${hint}</span>
+      </div>
+      <div class="ac-list" role="listbox">
+        ${currentItems.map((it, idx) => `
+          <button type="button" class="ac-item ${idx === activeIndex ? 'ac-active' : ''}" data-ac-idx="${idx}" role="option" aria-selected="${idx === activeIndex}">
+            <div class="ac-ico">${it.iconHtml}</div>
+            <div class="ac-main">
+              <div class="ac-row">
+                <span class="ac-label">${esc(it.label)}</span>
+                <span class="ac-token">${esc(it.token)}</span>
+                ${it.badge ? `<span class="ac-badge">${esc(it.badge)}</span>` : ''}
+              </div>
+              ${it.desc ? `<div class="ac-desc">${esc(it.desc)}</div>` : ''}
+            </div>
+          </button>
+        `).join('')}
+      </div>
+    `;
+    menuEl.hidden = false;
+
+    const activeItemEl = menuEl.querySelector('.ac-item.ac-active');
+    activeItemEl?.scrollIntoView({ block: 'nearest' });
+  }
+
+  function selectItem(item) {
+    if (!item) return;
+    const val = inputEl.value;
+    const before = val.slice(0, tokenStart);
+    const after = val.slice(inputEl.selectionStart);
+
+    if (item.action) {
+      inputEl.value = (before + after).trim();
+      hide();
+      inputEl.dispatchEvent(new Event('input'));
+      item.action();
+      return;
+    }
+
+    const insertion = item.token + ' ';
+    inputEl.value = before + insertion + after;
+    const newPos = before.length + insertion.length;
+    inputEl.setSelectionRange(newPos, newPos);
+    hide();
+    inputEl.dispatchEvent(new Event('input'));
+    inputEl.focus();
+  }
+
+  inputEl.addEventListener('input', () => {
+    const cursor = inputEl.selectionStart;
+    const textBefore = inputEl.value.slice(0, cursor);
+
+    const mentionMatch = textBefore.match(/(?:^|\s)@([a-zA-Z0-9_-]*)$/);
+    const slashMatch = textBefore.match(/(?:^|\s)\/([a-zA-Z0-9_-]*)$/);
+
+    if (mentionMatch) {
+      currentMode = 'mention';
+      const q = mentionMatch[1].toLowerCase();
+      tokenStart = cursor - mentionMatch[1].length - 1;
+      currentItems = getMentionItems(q);
+      activeIndex = 0;
+      renderList();
+    } else if (slashMatch) {
+      currentMode = 'slash';
+      const q = slashMatch[1].toLowerCase();
+      tokenStart = cursor - slashMatch[1].length - 1;
+      currentItems = getSlashItems(q);
+      activeIndex = 0;
+      renderList();
+    } else {
+      hide();
+    }
+  });
+
+  inputEl.addEventListener('keydown', (e) => {
+    if (menuEl.hidden || !currentItems.length) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      activeIndex = (activeIndex + 1) % currentItems.length;
+      renderList();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      activeIndex = (activeIndex - 1 + currentItems.length) % currentItems.length;
+      renderList();
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      if (!e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        selectItem(currentItems[activeIndex]);
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      hide();
+    }
+  });
+
+  menuEl.addEventListener('mousedown', (e) => {
+    const btn = e.target.closest('[data-ac-idx]');
+    if (!btn) return;
+    e.preventDefault();
+    const idx = Number(btn.dataset.acIdx);
+    selectItem(currentItems[idx]);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!boxEl.contains(e.target)) hide();
+  });
+}
+
+function showWelcome(initialProject) {
+  state.view = 'welcome';
   state.chat = null;
   state.current = null;
-  renderChatList();
-  renderRunList();
+  renderSidebar();
+  const projects = state.projects ?? [];
+  const defaultPath = initialProject || localStorage.getItem('aiteam.repo') || projects[0]?.path || '';
+  const defaultName = defaultPath ? defaultPath.split(/[\\/]/).pop() : 'Elegir carpeta…';
+  const agents = state.agents.filter((a) => a.installed);
+  const savedModel = localStorage.getItem('aiteam.model') || '';
+  const savedEffort = localStorage.getItem('aiteam.effort') || 'auto';
   const main = $('#main');
-  main.innerHTML = '';
-  main.append($('#newChatTpl').content.cloneNode(true));
-  const lastRepo = localStorage.getItem('aiteam.repo');
-  if (lastRepo) $('[name=repoPath]').value = lastRepo;
-  $('[data-agent-pick]').innerHTML = agentPickHtml();
-  $('#newChatForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const f = new FormData(e.target);
-    const btn = e.target.querySelector('button[type=submit]');
-    const errEl = $('[data-form-error]');
-    btn.disabled = true;
-    errEl.hidden = true;
+  main.classList.add('welcome-active');
+  main.innerHTML = `
+    <div class="claude-welcome">
+      <div class="welcome-top-bar">
+        <span class="welcome-kicker">Nueva sesión</span>
+        <div class="welcome-top-actions">
+          <button type="button" class="ghost small" id="welcomePreviewBtn" title="Vista previa web en vivo y detector de puertos">${icon('globe', 14)} Vista previa</button>
+          <button type="button" class="ghost small" id="welcomeFilesBtn" ${defaultPath ? '' : 'hidden'} title="Explorar archivos del proyecto">${icon('folder', 14)} Archivos</button>
+          <button type="button" class="ghost small" id="welcomeCmdBtn" title="Paleta de comandos y recetas (Ctrl+K)">${icon('command', 14)} Recetas</button>
+          <button type="button" class="ghost small" id="welcomeHelpBtn" title="Ver cómo funciona AITeam">${icon('help', 14)} Cómo funciona</button>
+        </div>
+      </div>
+
+      <div class="welcome-stage">
+        <div class="welcome-hero">
+          <img src="icon-192.png" width="46" height="46" alt="" class="welcome-logo" />
+          <h1>¿En qué trabajamos hoy?</h1>
+          <p class="muted">Tus IAs colaboran sobre una copia segura de tu proyecto. Revisa antes de aplicar.</p>
+        </div>
+
+        <div class="welcome-steps">
+          <div class="w-step"><span class="w-num">1</span><div><b>Elige tu carpeta</b><small>En el selector o con Examinar</small></div></div>
+          <div class="w-step"><span class="w-num">2</span><div><b>Pide o encarga</b><small>Al equipo, a una IA o en paralelo</small></div></div>
+          <div class="w-step"><span class="w-num">3</span><div><b>Revisa y aplica</b><small>Tu proyecto original no se toca sin permiso</small></div></div>
+        </div>
+
+        <div class="quick-prompts">
+          <button type="button" class="prompt-chip" data-quick-prompt="Analiza este proyecto, explícame cómo está organizado y qué mejoras recomiendas." data-quick-target="equipo">
+            ${icon('search', 13)} <span>Analizar con todo el equipo</span>
+          </button>
+          <button type="button" class="prompt-chip" data-quick-prompt="Revisa posibles errores, problemas de rendimiento o casos límite y corrígelos." data-quick-target="parallel">
+            ${icon('bolt', 13)} <span>Buscar y corregir fallos en paralelo</span>
+          </button>
+          <button type="button" class="prompt-chip" data-quick-prompt="Mejora el diseño visual y la facilidad de uso de la interfaz principal." data-quick-target="claude">
+            ${icon('palette', 13)} <span>Mejorar diseño e interfaz</span>
+          </button>
+        </div>
+      </div>
+
+      <form class="claude-composer" id="welcomeForm">
+        <div class="composer-box pro-composer" id="welcomeComposerBox">
+          <div class="composer-attachments" id="welcomeAttachments" hidden></div>
+          <div class="composer-main-area">
+            <textarea id="welcomeInput" rows="2" placeholder="Describe una tarea, pega una captura (Ctrl+V) o pregunta a tu equipo…"></textarea>
+          </div>
+          <div class="composer-toolbar">
+            <div class="composer-toolbar-left">
+              <div class="composer-pill" title="Carpeta del proyecto donde trabajarán las IAs">
+                ${icon('folder', 13)}
+                <select id="welcomeProjectSel" class="pill-native-select">
+                  ${projects.map((p) => `<option value="${esc(p.path)}" ${normPath(p.path) === normPath(defaultPath) ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+                  ${defaultPath && !projects.some((p) => normPath(p.path) === normPath(defaultPath)) ? `<option value="${esc(defaultPath)}" selected>${esc(defaultName)}</option>` : ''}
+                  <option value="__pick__">Examinar carpeta…</option>
+                </select>
+              </div>
+              <div class="composer-pill" title="Qué permisos tienen las IAs">
+                ${icon('lock', 13)}
+                <select id="welcomeAutonomySel" class="pill-native-select" data-levels></select>
+              </div>
+              <div class="composer-pill" title="Modelo preferido para la sesión">
+                ${icon('cpu', 13)}
+                <select id="welcomeModelSel" class="pill-native-select">
+                  ${MODEL_OPTIONS.map(([val, lbl]) => `<option value="${esc(val)}" ${val === savedModel ? 'selected' : ''}>${esc(lbl.replace('Automático del CLI', 'Modelo: Auto').replace('Haiku / Flash (rápido)', 'Rápido').replace('Sonnet / Pro (equilibrado)', 'Equilibrado').replace('Opus (máxima capacidad)', 'Opus'))}</option>`).join('')}
+                </select>
+              </div>
+              <div class="composer-pill" title="Modo de ejecución">
+                ${icon('bolt', 13)}
+                <select id="welcomeTargetSel" class="pill-native-select">
+                  <option value="auto">Automático</option>
+                  <option value="equipo">Todo el equipo (@equipo)</option>
+                  <option value="parallel">En paralelo</option>
+                  ${agents.map((a) => `<option value="agent:${esc(a.handle ?? a.id)}">Solo ${esc(a.name)}</option>`).join('')}
+                </select>
+              </div>
+              <div class="composer-pill pill-subtle" title="Nivel de esfuerzo y razonamiento (Claude / Codex)">
+                ${icon('brain', 13)}
+                <select id="welcomeEffortSel" class="pill-native-select">
+                  ${EFFORT_OPTIONS.map(([val, lbl]) => `<option value="${esc(val)}" ${val === savedEffort ? 'selected' : ''}>${esc(lbl.replace('Automático', 'Esfuerzo: Auto'))}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+            <div class="composer-toolbar-right">
+              <input type="file" id="welcomeAttachInput" accept="image/*" multiple hidden />
+              <button type="button" class="composer-tool-btn" id="welcomeAttachBtn" title="Adjuntar imagen o captura (o pega con Ctrl+V)">${icon('image', 16)}</button>
+              <button type="button" class="composer-tool-btn" id="welcomeMic" title="Dictar por voz (Ctrl+M)">${icon('mic', 16)}</button>
+              <button type="submit" class="composer-send-btn primary" id="welcomeSubmit" title="Empezar sesión (Intro)">
+                <span>Empezar</span>
+                ${icon('send', 13)}
+              </button>
+            </div>
+          </div>
+        </div>
+        <p class="error" id="welcomeError" hidden></p>
+      </form>
+    </div>`;
+
+  fillLevelSelects(main);
+  const autSel = $('#welcomeAutonomySel');
+  if (autSel) autSel.value = state.defaultAutonomy;
+
+  $('#welcomeModelSel')?.addEventListener('change', (e) => localStorage.setItem('aiteam.model', e.target.value));
+  $('#welcomeEffortSel')?.addEventListener('change', (e) => localStorage.setItem('aiteam.effort', e.target.value));
+
+  const projSel = $('#welcomeProjectSel');
+  projSel.addEventListener('change', async () => {
+    if (projSel.value !== '__pick__') {
+      localStorage.setItem('aiteam.repo', projSel.value);
+      $('#welcomeFilesBtn').hidden = !projSel.value;
+      return;
+    }
     try {
-      localStorage.setItem('aiteam.repo', f.get('repoPath'));
-      const chat = await api('POST', '/api/chats', { repoPath: f.get('repoPath'), agents: f.getAll('agents') });
+      const res = await api('POST', '/api/projects/pick');
+      if (res.path) {
+        await api('POST', '/api/projects', { path: res.path, prepare: true });
+        localStorage.setItem('aiteam.repo', res.path);
+        await loadProjects();
+        showWelcome(res.path);
+      } else {
+        projSel.value = defaultPath || '';
+      }
+    } catch (err) {
+      alert(err.message);
+      projSel.value = defaultPath || '';
+    }
+  });
+
+  $('#welcomePreviewBtn')?.addEventListener('click', () => togglePreviewPanel());
+  $('#welcomeCmdBtn')?.addEventListener('click', () => openCmdPalette());
+  $('#welcomeFilesBtn')?.addEventListener('click', () => {
+    if (projSel.value && projSel.value !== '__pick__') openFiles(projSel.value, 'proyecto original');
+  });
+  $('#welcomeHelpBtn')?.addEventListener('click', openHelpModal);
+
+  const input = $('#welcomeInput');
+  const autoResize = (ta) => {
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 180) + 'px';
+  };
+  input.addEventListener('input', () => autoResize(input));
+
+  const welcomeAttach = setupComposerAttachments({
+    boxEl: $('#welcomeComposerBox'),
+    inputEl: input,
+    stripEl: $('#welcomeAttachments'),
+    btnEl: $('#welcomeAttachBtn'),
+    fileInputEl: $('#welcomeAttachInput'),
+  });
+  setupComposerAutocomplete({
+    boxEl: $('#welcomeComposerBox'),
+    inputEl: input,
+    isWelcome: true,
+  });
+  const mic = attachDictation(input, $('#welcomeMic'));
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      $('#welcomeForm').requestSubmit();
+    }
+  });
+
+  main.querySelectorAll('[data-quick-prompt]').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      input.value = chip.dataset.quickPrompt;
+      autoResize(input);
+      const t = chip.dataset.quickTarget;
+      const targetSel = $('#welcomeTargetSel');
+      if (t === 'parallel') targetSel.value = 'parallel';
+      else if (t === 'equipo') targetSel.value = 'equipo';
+      else if (t) {
+        const opt = [...targetSel.options].find((o) => o.value === `agent:${t}`);
+        if (opt) targetSel.value = opt.value;
+      }
+      input.focus();
+    });
+  });
+
+  $('#welcomeForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    mic.stop();
+    const errEl = $('#welcomeError');
+    errEl.hidden = true;
+    let repoPath = projSel.value;
+    if (!repoPath || repoPath === '__pick__') {
+      const picked = await api('POST', '/api/projects/pick');
+      if (!picked.path) return;
+      repoPath = picked.path;
+    }
+    const attachments = welcomeAttach.items;
+    const rawText = input.value.trim() || (attachments.length ? 'Analiza las imágenes adjuntas.' : '');
+    const target = $('#welcomeTargetSel').value;
+    const autonomy = $('#welcomeAutonomySel').value || state.defaultAutonomy;
+    const model = $('#welcomeModelSel')?.value || '';
+    const effort = $('#welcomeEffortSel')?.value || 'auto';
+    const btn = $('#welcomeSubmit');
+    btn.disabled = true;
+    try {
+      await api('POST', '/api/projects', { path: repoPath, prepare: true });
+      localStorage.setItem('aiteam.repo', repoPath);
+      await loadProjects();
+      if (target === 'parallel' && rawText && !attachments.length) {
+        const chosen = usableAgents();
+        const run = await api('POST', '/api/runs', {
+          repoPath,
+          goal: rawText,
+          agents: chosen.length ? chosen : state.agents.filter((a) => a.installed).map((a) => a.id),
+          coordinator: chosen[0] ?? 'claude',
+          autonomy,
+          review: true,
+          autoApprove: true,
+        });
+        await loadRuns();
+        return openRun(run.id);
+      }
+      const chat = await api('POST', '/api/chats', { repoPath, agents: usableAgents(), autonomy });
+      if ((autonomy && autonomy !== chat.autonomy) || model || effort !== 'auto') {
+        await api('PATCH', `/api/chats/${chat.id}`, { autonomy, model, effort }).catch(() => {});
+      }
+      welcomeAttach.clear();
       await loadChats();
-      openChat(chat.id);
+      await openChat(chat.id);
+      if (rawText || attachments.length) {
+        const formatted = formatTargetedMessage(rawText, target);
+        await api('POST', `/api/chats/${chat.id}/messages`, { text: formatted, attachments, model, effort });
+      }
     } catch (err) {
       errEl.textContent = err.message;
       errEl.hidden = false;
       btn.disabled = false;
     }
   });
+  input.focus();
 }
 
+function formatTargetedMessage(text, target) {
+  if (!text) return '';
+  if (/^(@\w+|\/\w+)/.test(text)) return text;
+  if (target === 'equipo') return `@equipo ${text}`;
+  if (target === 'parallel') return `/equipo ${text}`;
+  if (target?.startsWith('agent:')) return `@${target.slice(6)} ${text}`;
+  return text;
+}
+
+function showNewChat() {
+  showWelcome();
+}
 
 /** Markdown mínimo: bloques de código, `código`, **negrita** y menciones. */
 function md(text) {
@@ -705,44 +1940,122 @@ async function openChat(id) {
   renderChatList();
   renderRunList();
 
-  $('#main').innerHTML = `
+  const projName = (chat.repoPath ?? '').split(/[\\/]/).pop() || 'Proyecto';
+  const targetKey = `aiteam.target.${id}`;
+
+  const main = $('#main');
+  main.classList.remove('welcome-active');
+  main.innerHTML = `
     <div class="chat">
       <div class="chat-head" id="chatHead"></div>
       <div class="chat-msgs" id="chatMsgs"></div>
-      <form class="composer" id="composer">
-        <div class="mention-bar" id="mentionBar"></div>
-        <div class="composer-row">
-          <textarea id="chatInput" rows="2" placeholder="Escribe a tu equipo… usa @nombre, @equipo o /equipo objetivo"></textarea>
-          <button type="button" class="mic-btn" id="chatMic" title="Dictar por voz (Ctrl+M)" aria-label="Dictar por voz">${icon('mic', 18)}</button>
-          <button class="primary" type="submit">Enviar</button>
+      <form class="claude-composer chat-composer" id="composer">
+        <div class="composer-box pro-composer" id="chatComposerBox">
+          <div class="composer-target-strip" id="mentionBar"></div>
+          <div class="composer-attachments" id="chatAttachments" hidden></div>
+          <div class="composer-main-area">
+            <textarea id="chatInput" rows="2" placeholder="Describe una tarea o haz una pregunta…"></textarea>
+          </div>
+          <div class="composer-toolbar">
+            <div class="composer-toolbar-left">
+              <button type="button" class="composer-pill composer-pill-btn" id="composerProjectBtn" title="${esc(chat.repoPath)} · Clic para ver archivos">
+                ${icon('folder', 13)} <span>${esc(projName)}</span>
+              </button>
+              <div class="composer-pill" title="Nivel de permisos de las IAs">
+                ${icon('lock', 13)}
+                <select id="composerAutonomy" class="pill-native-select"></select>
+              </div>
+              <div class="composer-pill" title="Modelo preferido">
+                ${icon('cpu', 13)}
+                <select id="composerModel" class="pill-native-select"></select>
+              </div>
+              <div class="composer-pill pill-subtle" title="Nivel de razonamiento profundo">
+                ${icon('brain', 13)}
+                <select id="composerEffort" class="pill-native-select"></select>
+              </div>
+              <button type="button" class="composer-pill composer-pill-btn" id="composerToolsBtn" title="Terminal, extensiones MCP y versiones">
+                ${icon('terminal', 13)} <span>Herramientas</span>
+              </button>
+            </div>
+            <div class="composer-toolbar-right">
+              <input type="file" id="chatAttachInput" accept="image/*" multiple hidden />
+              <button type="button" class="composer-tool-btn" id="chatAttachBtn" title="Adjuntar imagen o captura (o pega con Ctrl+V)">${icon('image', 16)}</button>
+              <button type="button" class="composer-tool-btn" id="chatMic" title="Dictar por voz (Ctrl+M)" aria-label="Dictar por voz">${icon('mic', 16)}</button>
+              <button class="composer-send-btn primary" type="submit" title="Enviar mensaje (Intro)">
+                <span>Enviar</span>
+                ${icon('send', 13)}
+              </button>
+            </div>
+          </div>
         </div>
-        <div class="muted hint">Intro envía · Mayús+Intro salto de línea · Ctrl+M para dictar · Sin mención responde la última IA que habló.</div>
       </form>
     </div>`;
 
-  $('#mentionBar').innerHTML =
-    chat.agents
-      .map((a) => {
+  const renderTargetStrip = () => {
+    const cur = localStorage.getItem(targetKey) || 'auto';
+    const items = [
+      { key: 'auto', label: 'Automático', desc: 'Responde la IA más adecuada o la última que habló', iconHtml: icon('chat', 14) },
+      { key: 'equipo', label: 'Todo el equipo', desc: 'Todas las IAs responden por turno', iconHtml: icon('users', 14) },
+      { key: 'parallel', label: 'Tarea en paralelo', desc: 'Se reparten subtareas y revisan el resultado', iconHtml: icon('bolt', 14) },
+      ...chat.agents.map((a) => {
         const info = agentInfo(a);
-        return `<button type="button" class="mention-btn" data-mention="${esc(info.handle ?? a)}" title="${esc(info.vendor ?? '')}">
-          ${emblem(a, 20)}<span class="mention-copy"><b>@${esc(info.handle ?? a)}</b><small>${esc(info.tagline ?? '')}</small></span></button>`;
-      })
-      .join('') +
-    `<button type="button" class="mention-btn" data-mention="equipo" title="Todas las IAs de la conversación">${icon('user', 18)}<span class="mention-copy"><b>@equipo</b><small>Todas responden por turnos</small></span></button>
-     <button type="button" class="mention-btn" data-mention="/equipo" title="Planificar, repartir y trabajar en paralelo">${icon('bolt', 18)}<span class="mention-copy"><b>/equipo</b><small>Tarea en paralelo con revisión</small></span></button>`;
-  $('#mentionBar').addEventListener('click', (e) => {
-    const button = e.target.closest('[data-mention]');
-    const m = button?.dataset.mention;
-    if (!m) return;
-    $('#mentionBar').querySelectorAll('.mention-btn').forEach((item) => item.classList.toggle('selected', item === button));
+        return { key: `agent:${info.handle ?? a}`, label: info.name, desc: info.tagline ?? info.vendor ?? '', iconHtml: emblem(a, 16) };
+      }),
+    ];
+    $('#mentionBar').innerHTML =
+      `<span class="target-strip-label">¿A quién le hablas?</span>` +
+      items
+        .map(
+          (it) => `<button type="button" class="target-chip ${cur === it.key ? 'selected' : ''}" data-target-mode="${esc(it.key)}" title="${esc(it.desc)}">
+            ${it.iconHtml}<span>${esc(it.label)}</span>
+          </button>`,
+        )
+        .join('');
     const input = $('#chatInput');
-    input.value = m.startsWith('/') ? `${m} ${input.value.replace(/^\/equipo\s*/, '')}` : `${input.value}${input.value && !input.value.endsWith(' ') ? ' ' : ''}@${m} `;
-    input.focus();
+    if (input) {
+      const ph = {
+        auto: 'Escribe tu mensaje o pega una imagen (Ctrl+V)…',
+        equipo: 'Pregunta a todo el equipo… (todas las IAs darán su punto de vista)',
+        parallel: 'Describe el objetivo completo… (se dividirá en subtareas en paralelo)',
+      }[cur] || `Escribe a ${cur.replace('agent:', '@')}…`;
+      input.placeholder = ph;
+    }
+  };
+  renderTargetStrip();
+
+  $('#mentionBar').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-target-mode]');
+    if (!btn) return;
+    localStorage.setItem(targetKey, btn.dataset.targetMode);
+    renderTargetStrip();
+    $('#chatInput')?.focus();
   });
 
+  $('#composerProjectBtn')?.addEventListener('click', () => openFiles(chat.worktree.path, 'copia de la conversación'));
+  $('#composerToolsBtn')?.addEventListener('click', openChatTools);
+
   const input = $('#chatInput');
+  const autoResizeChat = (ta) => {
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 200) + 'px';
+  };
+  input.addEventListener('input', () => autoResizeChat(input));
+
+  const chatAttach = setupComposerAttachments({
+    boxEl: $('#chatComposerBox'),
+    inputEl: input,
+    stripEl: $('#chatAttachments'),
+    btnEl: $('#chatAttachBtn'),
+    fileInputEl: $('#chatAttachInput'),
+  });
+  setupComposerAutocomplete({
+    boxEl: $('#chatComposerBox'),
+    inputEl: input,
+    isWelcome: false,
+  });
   const draftKey = `aiteam.draft.${id}`;
   input.value = localStorage.getItem(draftKey) ?? '';
+  autoResizeChat(input);
   input.addEventListener('input', () => localStorage.setItem(draftKey, input.value));
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -754,14 +2067,24 @@ async function openChat(id) {
   $('#composer').addEventListener('submit', async (e) => {
     e.preventDefault();
     mic.stop();
-    const text = input.value.trim();
-    if (!text) return;
+    const attachments = chatAttach.items;
+    const raw = input.value.trim() || (attachments.length ? 'Analiza las imágenes adjuntas.' : '');
+    if (!raw && !attachments.length) return;
+    const mode = localStorage.getItem(targetKey) || 'auto';
+    const text = formatTargetedMessage(raw, mode);
+    const model = $('#composerModel')?.value ?? state.chat?.model ?? '';
+    const effort = $('#composerEffort')?.value ?? state.chat?.effort ?? 'auto';
     input.value = '';
+    chatAttach.clear();
     localStorage.removeItem(draftKey);
+    if (mode === 'parallel') {
+      localStorage.setItem(targetKey, 'auto');
+      renderTargetStrip();
+    }
     try {
-      await api('POST', `/api/chats/${id}/messages`, { text });
+      await api('POST', `/api/chats/${id}/messages`, { text, attachments, model, effort });
     } catch (err) {
-      input.value = text;
+      input.value = raw;
       alert(err.message);
     }
   });
@@ -770,58 +2093,109 @@ async function openChat(id) {
   input.focus();
 }
 
+function syncComposerAutonomy() {
+  const sel = $('#composerAutonomy');
+  if (!sel || !state.chat) return;
+  const cur = state.chat.autonomy ?? state.defaultAutonomy;
+  const labels = {
+    edits: 'Solo archivos',
+    project: 'Comandos',
+    full: 'Control total',
+  };
+  sel.innerHTML = state.levels
+    .map((l) => `<option value="${l.id}" ${l.id === cur ? 'selected' : ''}>${esc(labels[l.id] ?? l.label)}</option>`)
+    .join('');
+  sel.onchange = async () => {
+    const value = sel.value;
+    if (!value || value === cur) return;
+    if (
+      value === 'full' &&
+      !confirm('Con "Control total" las IAs pueden ejecutar cualquier comando e instalar programas sin pedir permiso. ¿Activarlo en esta conversación?')
+    ) {
+      sel.value = cur;
+      return;
+    }
+    await api('PATCH', `/api/chats/${state.chat.id}`, { autonomy: value });
+  };
+
+  const modelSel = $('#composerModel');
+  if (modelSel) {
+    const curModel = state.chat.model ?? localStorage.getItem('aiteam.model') ?? '';
+    modelSel.innerHTML = MODEL_OPTIONS.map(([val, lbl]) => `<option value="${esc(val)}" ${val === curModel ? 'selected' : ''}>${esc(lbl)}</option>`).join('');
+    modelSel.onchange = async () => {
+      const model = modelSel.value;
+      localStorage.setItem('aiteam.model', model);
+      state.chat.model = model;
+      await api('PATCH', `/api/chats/${state.chat.id}`, { model }).catch(() => {});
+    };
+  }
+
+  const effortSel = $('#composerEffort');
+  if (effortSel) {
+    const curEffort = state.chat.effort ?? localStorage.getItem('aiteam.effort') ?? 'auto';
+    effortSel.innerHTML = EFFORT_OPTIONS.map(([val, lbl]) => `<option value="${esc(val)}" ${val === curEffort ? 'selected' : ''}>${esc(lbl)}</option>`).join('');
+    effortSel.onchange = async () => {
+      const effort = effortSel.value;
+      localStorage.setItem('aiteam.effort', effort);
+      state.chat.effort = effort;
+      await api('PATCH', `/api/chats/${state.chat.id}`, { effort }).catch(() => {});
+    };
+  }
+}
+
 function renderChatHead() {
   const chat = state.chat;
+  syncComposerAutonomy();
+  const projName = (chat.repoPath ?? '').split(/[\\/]/).pop() || '';
   const members = chat.agents
     .map((a) => {
       const st = chat.exhausted?.[a] ? badge([chat.exhausted[a].kind === 'auth' ? 'sin sesión' : 'sin cuota', 'err']) : chat.working?.agent === a ? badge(['trabajando', 'run']) : '';
-      return `<span class="member" title="${esc(agentInfo(a).name)}">${emblem(a, 18)}<span class="member-name">${esc(agentInfo(a).name)}</span>${st}</span>`;
+      return `<span class="member" title="${esc(agentInfo(a).name)}">${emblem(a, 16)}<span class="member-name">${esc(agentInfo(a).name)}</span>${st}</span>`;
     })
     .join('');
   $('#chatHead').innerHTML = `
     <div class="chat-identity">
-      <div class="chat-title" title="${esc(chat.title)}">${esc(chat.title)}</div>
+      <div class="chat-title-row">
+        <span class="chat-title" title="${esc(chat.title)}">${esc(chat.title)}</span>
+        <span class="chat-proj-badge" title="${esc(chat.repoPath)}">${esc(projName)}</span>
+      </div>
       <div class="members">${members}</div>
     </div>
     <div class="actions chat-actions">
-      ${chat.working ? '<button class="danger" id="chatStop">Detener</button>' : ''}
-      <div class="seg" id="chatAutonomy" title="Qué pueden hacer las IAs en esta conversación">
-        ${levelButtons(chat.autonomy ?? state.defaultAutonomy)}
-      </div>
-      <button id="chatFiles">${icon('folder')} Archivos</button>
-      <button id="chatDiff" class="primary">${icon('fileDiff')} Revisar cambios</button>
-      <button id="chatTools">Herramientas</button>
+      ${chat.working
+        ? `<button class="warn small" id="chatPause" title="Pausar temporalmente las IAs">${icon('pause', 13)} <span>Pausar</span></button>
+           <button class="danger small" id="chatStop" title="Detener y cancelar turno">${icon('stop', 13)} <span>Detener</span></button>`
+        : (chat.paused || (chat.pendingTurns && chat.pendingTurns.length > 0))
+          ? `<button class="primary small" id="chatResumeHead" title="Reanudar el trabajo del equipo">${icon('play', 13)} <span>Reanudar</span></button>`
+          : ''}
+      <button id="chatPreview" class="ghost small" title="Vista previa web en vivo y servidores locales">${icon('globe', 15)} Vista previa</button>
+      <button id="chatFiles" class="ghost small" title="Explorar los archivos de esta copia">${icon('folder', 15)} Archivos</button>
+      <button id="chatTools" class="ghost small" title="Terminal, comandos y versiones">${icon('terminal', 15)} Herramientas</button>
+      <button id="chatDiff" class="primary small">${icon('fileDiff', 15)} Revisar y aplicar cambios</button>
       <details class="chat-more">
         <summary aria-label="Más opciones" title="Más opciones">⋯</summary>
         <div class="chat-more-menu">
-          <div class="muted small-text">Proyecto y rama de trabajo</div>
-          <div class="mono small-text chat-path">${esc(chat.repoPath)}<br>${esc(chat.worktree.branch)}</div>
-          <button class="ghost" id="chatDelete" title="Borra la conversación y su copia de trabajo (la rama se conserva)">Eliminar conversación</button>
+          <div class="muted small-text">Copia aislada de trabajo</div>
+          <div class="mono small-text chat-path">${esc(chat.repoPath)}<br>Rama: ${esc(chat.worktree.branch)}</div>
+          <button class="ghost" id="chatHelpMenu">${icon('help', 14)} Cómo funciona esta ventana</button>
+          <button class="ghost danger" id="chatDelete" title="Borra la conversación y su copia de trabajo (la rama se conserva)">Eliminar conversación</button>
         </div>
       </details>
     </div>`;
-  $('#chatStop')?.addEventListener('click', () => api('POST', `/api/chats/${chat.id}/stop`));
+  $('#chatPause')?.addEventListener('click', () => api('POST', `/api/chats/${chat.id}/pause`).catch((err) => alert(err.message)));
+  $('#chatResumeHead')?.addEventListener('click', () => api('POST', `/api/chats/${chat.id}/resume`).catch((err) => alert(err.message)));
+  $('#chatStop')?.addEventListener('click', () => api('POST', `/api/chats/${chat.id}/stop`).catch((err) => alert(err.message)));
+  $('#chatPreview')?.addEventListener('click', () => togglePreviewPanel());
   $('#chatDiff').addEventListener('click', () => openReview('chats', chat.id));
   $('#chatFiles').addEventListener('click', () => openFiles(chat.worktree.path, 'copia de la conversación'));
   $('#chatTools').addEventListener('click', openChatTools);
-  $('#chatAutonomy').addEventListener('click', async (e) => {
-    const value = e.target.closest('[data-mode]')?.dataset.mode;
-    if (!value || value === (chat.autonomy ?? state.defaultAutonomy)) return;
-    if (value === 'project' && !confirm(`«${levelInfo('project').label}»: ${levelInfo('project').short}.\n\n${levelInfo('project').guarantees}\n\n¿Activarlo en esta conversación?`)) return;
-    if (
-      value === 'full' &&
-      !confirm('Con "Control total" las IAs pueden ejecutar cualquier comando en tu PC (instalar programas, lanzar servidores, borrar archivos…) sin pedirte permiso. ¿Activarlo en esta conversación?')
-    ) {
-      return;
-    }
-    await api('PATCH', `/api/chats/${chat.id}`, { autonomy: value });
-  });
+  $('#chatHelpMenu')?.addEventListener('click', openHelpModal);
   $('#chatDelete').addEventListener('click', async () => {
     if (!confirm('¿Eliminar esta conversación? Se borra su copia de trabajo; la rama git se conserva.')) return;
     await api('DELETE', `/api/chats/${chat.id}`);
     localStorage.removeItem('aiteam.chat');
     await loadChats();
-    state.chats.length ? openChat(state.chats[0].id) : showNewChat();
+    state.chats.length ? openChat(state.chats[0].id) : showWelcome();
   });
 }
 
@@ -831,15 +2205,24 @@ function messageHtml(m) {
     return `<div class="sys ${m.kind === 'error' ? 'error' : ''}">${esc(m.text)}</div>`;
   }
   if (m.from === 'user') {
-    return `<div class="bubble-row user"><div class="bubble">${md(m.text)}<div class="when">${fmtTime(m.ts)}</div></div><div class="avatar">${userAvatar(34)}</div></div>`;
+    const userImgs = Array.isArray(m.meta?.attachments) ? m.meta.attachments : [];
+    const userThumbs = userImgs.length && state.chat?.worktree?.path
+      ? `<div class="thumbs user-thumbs">${userImgs
+          .map((f) => {
+            const src = imgUrl(state.chat.worktree.path, f, m.id);
+            return `<figure class="thumb checker" title="Clic para ampliar"><img src="${src}" alt="${esc(f)}" loading="lazy" data-zoom="${src}" data-name="${esc(f)}" /></figure>`;
+          })
+          .join('')}</div>`
+      : '';
+    return `<div class="bubble-row user"><div class="bubble">${userThumbs}${md(m.text)}<div class="when">${fmtTime(m.ts)}</div></div><div class="avatar">${userAvatar(32)}</div></div>`;
   }
   const a = agentInfo(m.from);
   const to = m.to?.length ? ` <span class="muted">→ ${m.to.map((t) => `<span style="color:${agentInfo(t).color}">@${esc(agentInfo(t).handle ?? t)}</span>`).join(', ')}</span>` : '';
   const meta = m.meta ?? {};
   const images = meta.changed ? messageFiles(meta).filter(isImage) : [];
   const response = String(m.text ?? '').trim();
-  const concise = response.replace(/\s+/g, ' ').slice(0, 280);
-  const expanded = response.length > 360;
+  const concise = response.replace(/\s+/g, ' ').slice(0, 320);
+  const expanded = response.length > 420;
   const fileCount = meta.files?.length ?? (meta.changed ? messageFiles(meta).length : 0);
   const extras = [
     images.length
@@ -850,18 +2233,18 @@ function messageHtml(m) {
           })
           .join('')}</div>`
       : '',
-    meta.changed ? `<details><summary>${icon('file', 13)} Archivos cambiados</summary><pre class="output">${esc(meta.stat)}</pre></details>` : '',
-    meta.activity?.length ? `<details><summary>Actividad (${meta.activity.length})</summary><div class="activity">${meta.activity.map((l) => `<div>${iconizeLine(l, esc)}</div>`).join('')}</div></details>` : '',
+    meta.changed ? `<details><summary>${icon('file', 13)} ${fileCount || ''} archivo(s) tocados en este turno</summary><pre class="output">${esc(meta.stat)}</pre></details>` : '',
+    meta.activity?.length ? `<details><summary>Pasos realizados (${meta.activity.length})</summary><div class="activity">${meta.activity.map((l) => `<div>${iconizeLine(l, esc)}</div>`).join('')}</div></details>` : '',
   ].join('');
   return `<div class="bubble-row agent">
-    <div class="avatar">${emblem(m.from, 34)}</div>
+    <div class="avatar">${emblem(m.from, 32)}</div>
     <div class="bubble" style="border-left-color:${a.color}">
       <div class="who"><b style="color:${a.color}">${esc(a.name)}</b>${to} <span class="when">${fmtTime(m.ts)}${meta.durationMs ? ` · ${Math.round(meta.durationMs / 1000)}s` : ''}</span></div>
-      <div class="reply-result"><span>RESULTADO</span>${fileCount ? `<span>${fileCount} archivo(s) modificados</span>` : ''}</div>
+      ${fileCount ? `<div class="reply-result"><span>${icon('check', 12)} ${fileCount} archivo(s) modificados</span></div>` : ''}
       <div class="text">${expanded ? esc(concise) + '…' : md(response)}</div>
-      ${expanded ? `<details class="reply-full"><summary>Leer respuesta completa</summary><div class="text">${md(response)}</div></details>` : ''}
+      ${expanded ? `<details class="reply-full"><summary>Mostrar respuesta completa</summary><div class="text">${md(response)}</div></details>` : ''}
       ${extras}
-      <div class="reply-actions">${meta.changed ? `<button class="small primary" data-chat-review="${esc(state.chat.id)}">Ver cambios y aplicar</button>` : ''}<button class="small ghost" data-chat-adjust="${esc(m.id)}" data-adjust-agent="${esc(m.from)}">Pedir ajustes</button></div>
+      <div class="reply-actions">${meta.changed ? `<button class="small primary" data-chat-review="${esc(state.chat.id)}">Revisar y aplicar cambios</button>` : ''}<button class="small ghost" data-chat-adjust="${esc(m.id)}" data-adjust-agent="${esc(m.from)}">Pedir ajustes</button></div>
     </div>
   </div>`;
 }
@@ -879,45 +2262,70 @@ function teamConversationHtml(run, limit = 8) {
     const to = m.to === 'all' ? 'equipo' : m.to === 'user' ? 'ti' : agentInfo(m.to).name;
     return `<div class="team-message"><div class="muted small-text">${esc(from)} → ${esc(to)} · ${fmtTime(m.ts)}</div><div>${esc(m.text)}</div></div>`;
   }).join('');
-  return `${attention}${messages.length ? `<details class="team-conversation"><summary>Conversación del equipo (${messages.length} mensajes)</summary><div>${thread}</div></details>` : ''}`;
+  return `${attention}${messages.length ? `<details class="team-conversation"><summary>Conversación interna del equipo (${messages.length} mensajes)</summary><div>${thread}</div></details>` : ''}`;
 }
 
 function runCardHtml(run) {
-  if (!run) return '<span class="muted">Cargando resultado del equipo…</span>';
+  if (!run) return '<span class="muted">Cargando tarea del equipo…</span>';
   const total = run.tasks?.length ?? 0;
   const done = run.tasks?.filter((t) => t.status === 'done').length ?? 0;
   const waiting = run.status === 'awaiting_approval';
-  const ready = run.status === 'done' && run.integration;
+  const isDone = run.status === 'done';
+  const ready = isDone && Boolean(run.integration);
   const applied = ready && state.runChanges.get(run.id)?.applied;
+  const isPaused = run.status === 'paused';
+  const isActive = ['planning', 'bidding', 'running', 'reviewing', 'integrating', 'attacking', 'testing'].includes(run.status);
   const failed = ['interrupted', 'failed', 'cancelled'].includes(run.status);
-  const lead = applied ? 'Cambios aplicados al proyecto' : ready ? 'Resultado listo para revisar' : waiting ? 'El equipo espera tu aprobación' : failed ? 'La tarea terminó sin resultado aplicable' : 'El equipo está trabajando';
+  const lead = applied
+    ? 'Cambios aplicados al proyecto'
+    : ready
+      ? 'Resultado listo para revisar'
+      : isDone
+        ? 'Análisis de equipo completado'
+        : waiting
+          ? 'El equipo espera tu aprobación'
+          : isPaused
+            ? 'Tarea en pausa'
+            : failed
+              ? 'La tarea se detuvo antes de terminar'
+              : 'El equipo está trabajando en paralelo';
   const explain = ready
-    ? applied ? `Completó ${done} de ${total} subtareas. Los cambios ya están en tu proyecto.` : `Completó ${done} de ${total} subtareas. Revisa qué entregó antes de aplicar los cambios.`
-    : run.status === 'interrupted'
-      ? 'La app se detuvo durante el trabajo. Las subtareas terminadas y sus ramas siguen guardadas; puedes reanudar desde ahí.'
-      : failed ? (run.error || 'No se generó un resultado para aplicar.')
-        : total ? `${done} de ${total} subtareas completadas. ${run.phase ?? ''}` : (run.phase ?? 'Organizando el trabajo…');
-  const summaries = ready ? run.tasks?.filter((t) => t.status === 'done' && t.summary).map((t) => `<li><b>${esc(t.title)}</b>: ${esc(t.summary)}</li>`).join('') : '';
-  const delivered = ready ? run.tasks?.filter((t) => t.status === 'done' && t.summary).map((t) => t.title) ?? [] : [];
-  const undocumented = ready ? run.tasks?.filter((t) => t.status === 'done' && !t.summary).length ?? 0 : 0;
+    ? applied
+      ? `Se completaron ${done} de ${total} subtareas y los cambios ya están en tu proyecto.`
+      : `Se completaron ${done} de ${total} subtareas. Revisa los archivos modificados antes de aplicarlos a tu proyecto.`
+    : isDone
+      ? total
+        ? `Se completaron ${done} de ${total} subtareas sin modificar archivos del proyecto.`
+        : 'La tarea terminó correctamente.'
+      : isPaused
+        ? 'La tarea se encuentra pausada temporalmente. Las subtareas terminadas y sus ramas siguen guardadas.'
+        : run.status === 'interrupted'
+          ? 'La aplicación se cerró mientras trabajaban. Las subtareas terminadas siguen guardadas y puedes reanudar desde ahí.'
+          : failed
+            ? (run.error || 'No se generó un resultado para aplicar.')
+            : total
+              ? `${done} de ${total} subtareas completadas. ${run.phase ?? ''}`
+              : (run.phase ?? 'Organizando el reparto entre las IAs…');
+  const summaries = isDone ? run.tasks?.filter((t) => t.status === 'done' && t.summary).map((t) => `<li><b>${esc(t.title)}</b>: ${esc(t.summary)}</li>`).join('') : '';
+  const delivered = isDone ? run.tasks?.filter((t) => t.status === 'done' && t.summary).map((t) => t.title) ?? [] : [];
   const files = state.runChanges.get(run.id)?.files ?? [];
   const previewFiles = files.filter((f) => f.status !== 'D' && isImage(f.file))
     .sort((a, b) => Number(/candidatos?\//i.test(a.file)) - Number(/candidatos?\//i.test(b.file)))
     .slice(0, 3);
-  return `<div class="run-card-top"><span class="run-card-kicker">TRABAJO EN EQUIPO</span>${badge(STATUS[run.status] ?? [run.status, ''])}</div>
+  return `<div class="run-card-top"><span class="run-card-kicker">${icon('bolt', 13)} TAREA EN EQUIPO</span>${badge(STATUS[run.status] ?? [run.status, ''])}</div>
     <h3>${esc(lead)}</h3><p>${esc(explain)}</p>
-    ${ready && delivered.length ? `<p class="run-deliveries"><b>Entregas:</b> ${esc(delivered.slice(0, 3).join(' · '))}${delivered.length > 3 ? ` · y ${delivered.length - 3} más` : ''}</p>` : ''}
-    ${undocumented ? `<p class="muted small-text">${undocumented} subtarea(s) marcadas como terminadas sin entrega descrita.</p>` : ''}
-    ${ready && files.length ? `<p class="muted small-text">${files.length} archivo(s) modificados</p>` : ''}
-    ${previewFiles.length && run.integration?.worktree ? `<div class="run-previews">${previewFiles.map((f) => `<img src="${imgUrl(run.integration.worktree, f.file, run.id)}" alt="${esc(f.file)}" loading="lazy" data-zoom="${imgUrl(run.integration.worktree, f.file, run.id)}" data-name="${esc(f.file)}" /></div>`).join('')}</div>` : ''}
-    ${summaries ? `<details><summary>Ver detalles de las entregas</summary><ul>${summaries}</ul></details>` : ''}
+    ${delivered.length ? `<p class="run-deliveries"><b>Entregas:</b> ${esc(delivered.slice(0, 3).join(' · '))}${delivered.length > 3 ? ` · y ${delivered.length - 3} más` : ''}</p>` : ''}
+    ${ready && files.length ? `<p class="muted small-text">${files.length} archivo(s) listos para revisar</p>` : ''}
+    ${previewFiles.length && run.integration?.worktree ? `<div class="run-previews">${previewFiles.map((f) => `<img src="${imgUrl(run.integration.worktree, f.file, run.id)}" alt="${esc(f.file)}" loading="lazy" data-zoom="${imgUrl(run.integration.worktree, f.file, run.id)}" data-name="${esc(f.file)}" />`).join('')}</div>` : ''}
+    ${summaries ? `<details><summary>Resumen por subtarea</summary><ul>${summaries}</ul></details>` : ''}
     ${teamConversationHtml(run, 6)}
     <div class="actions">
-      ${ready && !applied ? `<button class="primary small" data-run-review="${esc(run.id)}">Ver resultado y aplicar</button>` : ''}
-      ${waiting ? `<button class="primary small" data-open-run="${esc(run.id)}">Revisar reparto</button>` : ''}
-      ${run.status === 'interrupted' && !run.cleaned ? `<button class="small primary" data-run-resume="${esc(run.id)}">Reanudar trabajo</button>` : ''}
-      ${failed ? `<button class="small" data-run-retry="${esc(run.id)}">Empezar de nuevo</button>` : ''}
-      <button class="small ghost" data-open-run="${esc(run.id)}">Detalles técnicos</button>
+      ${isActive ? `<button class="small warn" data-run-pause="${esc(run.id)}" title="Pausar la tarea temporalmente">${icon('pause', 13)} Pausar</button><button class="small danger" data-run-cancel="${esc(run.id)}" title="Cancelar la tarea">${icon('stop', 13)} Cancelar</button>` : ''}
+      ${ready && !applied ? `<button class="primary small" data-run-review="${esc(run.id)}">Revisar y aplicar cambios</button>` : ''}
+      ${waiting ? `<button class="primary small" data-open-run="${esc(run.id)}">Aprobar reparto</button>` : ''}
+      ${(run.status === 'paused' || run.status === 'interrupted') && !run.cleaned ? `<button class="small primary" data-run-resume="${esc(run.id)}" title="Reanudar tarea">${icon('play', 13)} Reanudar trabajo</button>` : ''}
+      ${failed && !isPaused ? `<button class="small" data-run-retry="${esc(run.id)}">Reintentar</button>` : ''}
+      <button class="small ghost" data-open-run="${esc(run.id)}">Ver panel completo</button>
     </div>`;
 }
 
@@ -943,12 +2351,30 @@ function liveHtml() {
   const a = agentInfo(w.agent);
   const lines = (state.live[w.agent] ?? []).slice(-8);
   return `<div class="bubble-row agent live">
-    <div class="avatar">${emblem(w.agent, 34)}</div>
+    <div class="avatar">${emblem(w.agent, 32)}</div>
     <div class="bubble" style="border-left-color:${a.color}">
-      <div class="who"><b style="color:${a.color}">${esc(a.name)}</b> <span class="typing">trabajando<span>.</span><span>.</span><span>.</span></span></div>
+      <div class="who"><b style="color:${a.color}">${esc(a.name)}</b> <span class="typing">pensando y trabajando<span>.</span><span>.</span><span>.</span></span></div>
       <div class="activity" id="liveActivity">${lines.map((l) => `<div>${iconizeLine(l, esc)}</div>`).join('')}</div>
     </div>
   </div>`;
+}
+
+/** Oculta avisos del sistema repetidos seguidos (p. ej. cambios de modo/permisos). */
+function cleanMessages(messages) {
+  const out = [];
+  for (const m of messages ?? []) {
+    const prev = out[out.length - 1];
+    if (m.from === 'system' && !m.meta?.runId && prev?.from === 'system' && !prev?.meta?.runId) {
+      if (prev.text === m.text) continue;
+      const isPerm = (t) => /^(Control total|Modo seguro|Permisos:)/.test(String(t ?? ''));
+      if (isPerm(prev.text) && isPerm(m.text)) {
+        out[out.length - 1] = m;
+        continue;
+      }
+    }
+    out.push(m);
+  }
+  return out;
 }
 
 function renderChat(forceScroll = false) {
@@ -957,12 +2383,28 @@ function renderChat(forceScroll = false) {
   const box = $('#chatMsgs');
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
   const pending = state.chat.pendingTurns?.length ?? 0;
-  const recovery = pending && !state.chat.working
-    ? `<div class="recovery-banner"><div><b>Trabajo pendiente</b><span> ${pending} turno(s) quedaron guardados. Los archivos parciales siguen en la copia.</span></div><button class="small primary" data-resume-chat="${esc(state.chat.id)}">Reanudar</button></div>`
+  const isPaused = Boolean(state.chat.paused);
+  const recovery = (pending || isPaused) && !state.chat.working
+    ? `<div class="recovery-banner ${isPaused ? 'paused-banner' : ''}"><div><b>${isPaused ? '⏸ Tarea en pausa' : 'Trabajo pendiente'}</b><span> ${isPaused ? 'El equipo ha pausado el turno. Los cambios y ramas están a salvo.' : `${pending} turno(s) pendientes guardados. Los archivos parciales siguen en la copia.`}</span></div><button class="small primary" data-resume-chat="${esc(state.chat.id)}">${icon('play', 13)} Reanudar tarea</button></div>`
     : '';
-  box.innerHTML = recovery + (state.chat.messages.length
-    ? state.chat.messages.map(messageHtml).join('')
-    : '<section class="empty empty-state"><h2>La conversación está lista</h2><p>Escribe tu objetivo abajo. Menciona a una IA por su @nombre, usa @equipo para pedir varias respuestas o /equipo para iniciar una tarea.</p></section>') + liveHtml();
+  const visible = cleanMessages(state.chat.messages);
+  box.innerHTML = recovery + (visible.length
+    ? visible.map(messageHtml).join('')
+    : `<section class="empty empty-state chat-empty-guide">
+        <h2>Conversación lista</h2>
+        <p class="muted">Elige arriba del cuadro de texto si hablas con una IA, con todo el equipo o si prefieres dividir una tarea en paralelo.</p>
+        <div class="quick-prompts">
+          <button type="button" class="prompt-chip" data-chat-quick="Explícame la estructura de este proyecto y por dónde empezar.">${icon('folder', 14)} <span>Explicar el proyecto</span></button>
+          <button type="button" class="prompt-chip" data-chat-quick="@equipo Propongan 3 mejoras prioritarias para este repositorio.">${icon('users', 14)} <span>Pedir ideas a todo el equipo</span></button>
+          <button type="button" class="prompt-chip" data-chat-quick="/equipo Revisa errores y mejora la interfaz principal.">${icon('bolt', 14)} <span>Repartir tarea en paralelo</span></button>
+        </div>
+      </section>`) + liveHtml();
+  box.querySelectorAll('[data-chat-quick]').forEach((b) => {
+    b.addEventListener('click', () => {
+      const inp = $('#chatInput');
+      if (inp) { inp.value = b.dataset.chatQuick; inp.focus(); }
+    });
+  });
   hydrateRunCards();
   if (forceScroll || nearBottom) box.scrollTop = box.scrollHeight;
 }
@@ -987,6 +2429,19 @@ document.addEventListener('click', (e) => {
   if (review) return openReview('runs', review.dataset.runReview);
   const retry = e.target.closest('[data-run-retry]');
   if (retry) return retryTeamRun(state.runDetails.get(retry.dataset.runRetry));
+  const pauseRun = e.target.closest('[data-run-pause]');
+  if (pauseRun) {
+    return api('POST', `/api/runs/${pauseRun.dataset.runPause}/pause`)
+      .then((run) => { state.runDetails.set(run.id, run); renderChat(); })
+      .catch((err) => alert(err.message));
+  }
+  const cancelRun = e.target.closest('[data-run-cancel]');
+  if (cancelRun) {
+    if (!confirm('¿Cancelar esta tarea del equipo?')) return;
+    return api('POST', `/api/runs/${cancelRun.dataset.runCancel}/cancel`)
+      .then((run) => { state.runDetails.set(run.id, run); renderChat(); })
+      .catch((err) => alert(err.message));
+  }
   const resumeRun = e.target.closest('[data-run-resume]');
   if (resumeRun) return api('POST', `/api/runs/${resumeRun.dataset.runResume}/resume`).then((run) => { state.runDetails.set(run.id, run); renderChat(); }).catch((err) => alert(err.message));
   const details = e.target.closest('[data-open-run]');
@@ -1027,13 +2482,16 @@ document.addEventListener('click', async (e) => {
 // Las utilidades avanzadas quedan en una sola vista opcional de la conversación.
 const chatToolsDlg = document.createElement('dialog');
 chatToolsDlg.className = 'chat-tools-dlg';
-chatToolsDlg.innerHTML = `<div class="dialog-head"><div><h2>Herramientas de la conversación</h2><p class="muted small-text">Comandos, terminal y versiones de esta copia de trabajo</p></div><button class="ghost" data-close>Cerrar</button></div><div id="chatToolsBody"></div>`;
+chatToolsDlg.innerHTML = `<div class="dialog-head"><div><h2>Herramientas de la conversación</h2><p class="muted small-text">Comandos, terminal y versiones de esta copia de trabajo</p></div><button class="ghost dlg-x" data-close title="Cerrar (Esc)" aria-label="Cerrar">✕</button></div><div id="chatToolsBody"></div>`;
 document.body.append(chatToolsDlg);
 chatToolsDlg.querySelector('[data-close]').addEventListener('click', () => chatToolsDlg.close());
 let chatToolsTab = 'commands';
 let chatToolsId = null;
 
-async function openChatTools() {
+async function openChatTools(initialTab) {
+  if (typeof initialTab === 'string' && initialTab) {
+    chatToolsTab = initialTab;
+  }
   chatToolsId = state.chat.id;
   chatToolsDlg.showModal();
   await renderChatTools();
@@ -1219,9 +2677,32 @@ function usableAgents() {
   return state.agents.filter((a) => a.installed && a.enabled !== false && a.working !== false).map((a) => a.id);
 }
 
+let sidebarFilter = '';
+let sidebarGroupMode = localStorage.getItem('aiteam.sidebarGroup') || 'folders'; // 'folders' | 'recent'
+const expandedTeamAgents = new Set();
+
+$('#sidebarSearch')?.addEventListener('input', (e) => {
+  sidebarFilter = e.target.value.trim().toLowerCase();
+  renderSidebar();
+});
+$('#toggleSidebarGroup')?.addEventListener('click', () => {
+  sidebarGroupMode = sidebarGroupMode === 'folders' ? 'recent' : 'folders';
+  localStorage.setItem('aiteam.sidebarGroup', sidebarGroupMode);
+  renderSidebar();
+});
+$('#homeBtn')?.addEventListener('click', () => showWelcome());
+$('#newSessionBtn')?.addEventListener('click', () => showWelcome());
+$('#quickTaskBtn')?.addEventListener('click', () => showNew());
+$('#tourBtn')?.addEventListener('click', () => openHelpModal());
+
 function renderSidebar() {
   const tree = $('#projectTree');
   if (!tree) return;
+  $('#newSessionBtn')?.classList.toggle('active-nav', state.view === 'welcome');
+  $('#quickTaskBtn')?.classList.toggle('active-nav', state.view === 'new');
+  const grpBtn = $('#toggleSidebarGroup');
+  if (grpBtn) grpBtn.textContent = sidebarGroupMode === 'folders' ? 'Carpetas' : 'Recientes';
+
   // Proyectos guardados + los que aparezcan en conversaciones o tareas nuevas.
   const paths = new Map(state.projects.map((p) => [normPath(p.path), p]));
   for (const item of [...state.chats, ...state.runs]) {
@@ -1230,42 +2711,124 @@ function renderSidebar() {
     }
   }
   if (!paths.size) {
-    tree.innerHTML = '<p class="muted small-text" style="padding:0 6px">Aún no hay proyectos. Usa «+ Añadir» para elegir un repositorio y empezar.</p>';
+    tree.innerHTML = `<div class="sidebar-empty-card">
+      <p class="muted small-text">Aún no hay proyectos vinculados.</p>
+      <button type="button" class="small ghost" data-empty-add-proj>${icon('folder', 13)} Elegir primera carpeta</button>
+    </div>`;
+    tree.querySelector('[data-empty-add-proj]')?.addEventListener('click', showAddProject);
     return;
   }
-  tree.innerHTML = [...paths.values()]
+
+  const q = sidebarFilter;
+
+  if (sidebarGroupMode === 'recent') {
+    const allItems = [
+      ...state.chats.map((c) => ({ kind: 'chat', ts: c.updatedAt ?? c.createdAt ?? '', item: c })),
+      ...state.runs
+        .filter((r) => !state.chats.some((c) => c.branch && c.branch === r.baseBranch))
+        .map((r) => ({ kind: 'run', ts: r.createdAt ?? '', item: r })),
+    ]
+      .filter(({ kind, item }) => {
+        if (!q) return true;
+        const projName = (item.repoPath ?? '').split(/[\\/]/).pop().toLowerCase();
+        const text = (kind === 'chat' ? item.title : item.goal) ?? '';
+        return text.toLowerCase().includes(q) || projName.includes(q);
+      })
+      .sort((a, b) => String(b.ts).localeCompare(String(a.ts)));
+
+    if (!allItems.length) {
+      tree.innerHTML = '<p class="muted small-text" style="padding:8px">Sin sesiones recientes. Pulsa «Nueva sesión».</p>';
+      return;
+    }
+    tree.innerHTML = `<ul class="run-list recent-flat-list">${allItems
+      .map(({ kind, item }) => {
+        const projName = (item.repoPath ?? '').split(/[\\/]/).pop() || 'proyecto';
+        if (kind === 'chat') {
+          return `<li data-chat="${item.id}" class="${state.view === 'chat' && state.chat?.id === item.id ? 'active' : ''}">
+            <span class="ico">${icon('chat', 14)}</span>
+            <div class="session-item-copy">
+              <span class="label">${esc(item.title)}</span>
+              <span class="sublabel">${esc(projName)}</span>
+            </div>
+            ${item.working ? `<span class="dot pulse" style="background:${agentInfo(item.working.agent).color}" title="${esc(agentInfo(item.working.agent).name)} trabajando"></span>` : ''}
+          </li>`;
+        }
+        return `<li data-run="${item.id}" class="${state.view === 'run' && state.current?.id === item.id ? 'active' : ''}">
+          <span class="ico">${icon('bolt', 14)}</span>
+          <div class="session-item-copy">
+            <span class="label">${esc(item.goal)}</span>
+            <span class="sublabel">${esc(projName)} · Tarea</span>
+          </div>
+          ${badge(STATUS[item.status] ?? [item.status, ''])}
+        </li>`;
+      })
+      .join('')}</ul>`;
+    return;
+  }
+
+  const html = [...paths.values()]
     .map((p) => {
       const key = normPath(p.path);
-      const chats = state.chats.filter((c) => normPath(c.repoPath) === key);
-      const runs = state.runs.filter((r) => normPath(r.repoPath) === key && !chats.some((c) => c.branch && c.branch === r.baseBranch));
-      const open = !collapsed.has(key);
+      const matchProj = !q || p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q);
+      const chats = state.chats.filter((c) => normPath(c.repoPath) === key && (matchProj || String(c.title ?? '').toLowerCase().includes(q)));
+      const runs = state.runs.filter(
+        (r) =>
+          normPath(r.repoPath) === key &&
+          !state.chats.some((c) => c.branch && c.branch === r.baseBranch) &&
+          (matchProj || String(r.goal ?? '').toLowerCase().includes(q)),
+      );
+      if (q && !matchProj && !chats.length && !runs.length) return '';
+      const open = q ? true : !collapsed.has(key);
+      const totalCount = chats.length + runs.length;
       const items = [
         ...chats.map(
           (c) => `<li data-chat="${c.id}" class="${state.view === 'chat' && state.chat?.id === c.id ? 'active' : ''}">
-            <span class="ico">${icon('chat', 14)}</span><span class="label">${esc(c.title)}</span>
+            <span class="ico">${icon('chat', 14)}</span>
+            <div class="session-item-copy">
+              <span class="label">${esc(c.title)}</span>
+              <span class="sublabel">${esc(p.name)}</span>
+            </div>
             ${c.working ? `<span class="dot pulse" style="background:${agentInfo(c.working.agent).color}" title="${esc(agentInfo(c.working.agent).name)} trabajando"></span>` : ''}
           </li>`,
         ),
         ...runs.map(
           (r) => `<li data-run="${r.id}" class="${state.view === 'run' && state.current?.id === r.id ? 'active' : ''}">
-            <span class="ico">${icon('bolt', 14)}</span><span class="label">${esc(r.goal)}</span>${badge(STATUS[r.status] ?? [r.status, ''])}
+            <span class="ico">${icon('bolt', 14)}</span>
+            <div class="session-item-copy">
+              <span class="label">${esc(r.goal)}</span>
+              <span class="sublabel">${esc(p.name)} · Tarea</span>
+            </div>
+            ${badge(STATUS[r.status] ?? [r.status, ''])}
           </li>`,
         ),
       ].join('');
-      return `<div class="project">
+      return `<div class="project ${open ? 'is-open' : ''}">
         <div class="project-head" data-toggle="${esc(key)}" title="${esc(p.path)}">
           <span class="caret">${icon(open ? 'chevDown' : 'chevRight', 13)}</span>
+          <span class="proj-folder-ico">${icon('folder', 14)}</span>
           <span class="project-name">${esc(p.name)}</span>
+          ${totalCount ? `<span class="proj-count">${totalCount}</span>` : ''}
           <span class="project-actions">
-            <button class="small ghost" data-new-chat="${esc(p.path)}" title="Nueva conversación">${icon('chatPlus', 15)}</button>
-            <button class="small ghost" data-new-run="${esc(p.path)}" title="Nueva tarea de equipo (en paralelo)">${icon('boltPlus', 15)}</button>
-            <button class="small ghost" data-files="${esc(p.path)}" title="Ver archivos">${icon('folder', 15)}</button>
+            <button class="small ghost proj-act icon-act" data-new-chat="${esc(p.path)}" title="Nueva conversación en ${esc(p.name)}">${icon('chatPlus', 14)}</button>
+            <button class="small ghost proj-act icon-act" data-new-run="${esc(p.path)}" title="Nueva tarea en paralelo en ${esc(p.name)}">${icon('bolt', 14)}</button>
+            <button class="small ghost proj-act icon-act" data-files="${esc(p.path)}" title="Explorar archivos de ${esc(p.name)}">${icon('file', 14)}</button>
           </span>
         </div>
-        ${open ? `<ul class="run-list">${items || '<li class="muted small-text" style="cursor:default">Sin actividad. Abre una conversación o crea una tarea con los botones del proyecto.</li>'}</ul>` : ''}
+        ${
+          open
+            ? `<ul class="run-list">${
+                items ||
+                `<li class="proj-empty-start" data-new-chat="${esc(p.path)}">
+                  ${icon('plus', 13)} <span>Iniciar sesión en ${esc(p.name)}</span>
+                </li>`
+              }</ul>`
+            : ''
+        }
       </div>`;
     })
+    .filter(Boolean)
     .join('');
+  tree.innerHTML = html || '<p class="muted small-text" style="padding:4px 8px">No hay sesiones que coincidan con la búsqueda.</p>';
 }
 
 $('#projectTree').addEventListener('click', async (e) => {
@@ -1288,6 +2851,8 @@ $('#projectTree').addEventListener('click', async (e) => {
 async function newChatFor(repoPath, btn) {
   if (btn) btn.disabled = true;
   try {
+    await api('POST', '/api/projects', { path: repoPath, prepare: true });
+    localStorage.setItem('aiteam.repo', repoPath);
     const chat = await api('POST', '/api/chats', { repoPath, agents: usableAgents() });
     await loadChats();
     openChat(chat.id);
@@ -1306,18 +2871,23 @@ function showAddProject() {
   const main = $('#main');
   main.innerHTML = '';
   main.append($('#addProjectTpl').content.cloneNode(true));
+  attachFolderPicker($('#addProjectForm'), $('[name=path]'));
   $('#addProjectForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const path = new FormData(e.target).get('path');
     const errEl = $('[data-form-error]');
+    const btn = e.target.querySelector('button[type=submit]');
     errEl.hidden = true;
+    btn.disabled = true;
     try {
-      const p = await api('POST', '/api/projects', { path });
+      const p = await api('POST', '/api/projects', { path, prepare: true });
+      localStorage.setItem('aiteam.repo', p.path);
       await loadProjects();
-      await newChatFor(p.path);
+      showWelcome(p.path);
     } catch (err) {
       errEl.textContent = err.message;
       errEl.hidden = false;
+      btn.disabled = false;
     }
   });
   $('[name=path]').focus();
@@ -1331,14 +2901,14 @@ $('#selfDevBtn').addEventListener('click', async (e) => {
     const candidates = state.chats.filter((c) => normPath(c.repoPath) === normPath(root));
     if (candidates.length) return openChat(candidates[0].id);
     if (!usableAgents().length) throw new Error('Ninguna IA está disponible. Revisa el equipo y prueba su conexión.');
-    await api('POST', '/api/projects', { path: root });
+    await api('POST', '/api/projects', { path: root, prepare: true });
     await loadProjects();
     await newChatFor(root);
   } catch (err) { alert(err.message); }
   finally { btn.disabled = false; }
 });
 
-// ------------------------------------------------------------ equipo y uso
+// ------------------------------------------------------------ equipo y uso (compacto y desplegable)
 
 async function loadUsage() {
   state.usage = await api('GET', '/api/usage');
@@ -1355,48 +2925,103 @@ function fmtReset(iso) {
 function meter(label, w) {
   if (!w) return `<div class="meter"><span class="m-label">${label}</span><span class="muted">sin datos</span></div>`;
   const left = Math.max(0, 100 - w.percent);
-  const cls = w.percent >= 90 ? 'err' : w.percent >= 70 ? 'warn' : 'ok';
-  return `<div class="meter" title="Usado ${w.percent}%${w.resetsAt ? ` · se reinicia ${fmtReset(w.resetsAt)}` : ''}">
+  const cls = left <= 10 ? 'err' : left <= 30 ? 'warn' : 'ok';
+  return `<div class="meter" title="Disponible: ${left}% (usado ${w.percent}%)${w.resetsAt ? ` · se renueva ${fmtReset(w.resetsAt)}` : ''}">
     <span class="m-label">${label}</span>
-    <span class="m-bar"><i class="${cls}" style="width:${w.percent}%"></i></span>
-    <span class="m-val">${left}% libre${w.resetsAt ? ` · ${fmtReset(w.resetsAt)}` : ''}</span>
+    <span class="m-bar"><i class="${cls}" style="width:${left}%"></i></span>
+    <span class="m-val">${left}% · ${fmtReset(w.resetsAt)}</span>
   </div>`;
 }
 
 function renderTeam() {
   const panel = $('#teamPanel');
   if (!panel) return;
-  panel.innerHTML = state.agents
+  const visibleAgents = state.agents.filter((a) => a.enabled !== false);
+  const countEl = $('#activeTeamCount');
+  if (countEl) countEl.textContent = `${visibleAgents.filter((a) => a.installed).length}/${visibleAgents.length}`;
+
+  panel.innerHTML = visibleAgents
     .map((a) => {
       const u = state.usage?.[a.id];
-      const cls = !a.installed ? 'err' : a.working === true ? 'ok' : a.working === false ? 'err' : 'unk';
-      const title = !a.installed
-        ? 'CLI no instalado'
-        : a.working === false
-          ? `No responde: ${a.error ?? ''}`
-          : a.working === true
-            ? `Funciona (${a.version})`
-            : `Instalado (${a.version}). Pulsa "Probar" para comprobar la sesión.`;
+      const sessionExhausted = u?.session && u.session.percent >= 100;
+      const cls = !a.installed ? 'err' : sessionExhausted ? 'warn' : a.working === true ? 'ok' : a.working === false ? 'err' : 'ok';
+      const statusText = !a.installed
+        ? 'No instalada'
+        : sessionExhausted
+          ? 'Sin cuota'
+          : a.working === false
+            ? 'Sin sesión'
+            : 'Lista';
+      const statusCls = !a.installed || a.working === false ? 'err' : sessionExhausted ? 'warn' : 'ok';
+      const isExpanded = expandedTeamAgents.has(a.id);
+
+      let rightSummary = `<span class="agent-state-pill ${statusCls}">${statusText}</span>`;
+      if (a.installed && u?.session) {
+        const left = Math.max(0, 100 - u.session.percent);
+        const barCls = left <= 10 ? 'err' : left <= 30 ? 'warn' : 'ok';
+        rightSummary = `<span class="mini-quota" title="Cuota 5h: ${left}% disponible · Clic para ver detalle">
+          <span class="mini-quota-bar"><i class="${barCls}" style="width:${left}%"></i></span>
+          <span class="mini-quota-txt">${left}%</span>
+        </span>`;
+      }
+
       const meters =
         u && (u.session || u.weekly)
-          ? meter('Sesión', u.session) + meter('Semana', u.weekly)
-          : `<div class="meter muted small-text">${u?.note ?? 'Sin datos de uso todavía.'}${u?.callsToday ? ` · ${u.callsToday} peticiones hoy` : ''}</div>`;
-      return `<div class="team-agent">
-        <div class="team-row" title="${esc(title)}">
-          <span class="dot ${cls}"></span>${emblem(a.id, 18)}<b style="color:${a.color}">${esc(a.name)}</b>
-          <button class="small ghost" data-test="${a.id}" ${a.installed ? '' : 'disabled'}>Probar</button>
+          ? meter('5 horas', u.session) + meter('Semanal', u.weekly)
+          : `<div class="meter muted small-text">${u?.callsToday ? `${u.callsToday} consultas hoy · ` : ''}Cuota gestionada por su CLI</div>`;
+
+      return `<div class="team-agent-card ${isExpanded ? 'expanded' : ''}" data-agent-card="${esc(a.id)}">
+        <div class="team-row-compact" data-toggle-team-agent="${esc(a.id)}" title="Clic para desplegar cuota y opciones de ${esc(a.name)}">
+          <span class="dot ${cls}"></span>
+          ${emblem(a.id, 17)}
+          <b class="team-agent-name" style="color:${a.color}">${esc(a.name)}</b>
+          ${a.isDefault ? `<span class="team-default-star" title="Agente predeterminado">${icon('star', 11)}</span>` : ''}
+          <span class="team-row-right">
+            ${rightSummary}
+            <span class="team-chev">${icon(isExpanded ? 'chevDown' : 'chevRight', 12)}</span>
+          </span>
         </div>
-        ${meters}
+        ${
+          isExpanded
+            ? `<div class="team-agent-drawer">
+                ${meters}
+                <div class="team-drawer-actions">
+                  <span class="muted small-text mono">${esc(a.cli || a.id)}</span>
+                  <div class="actions">
+                    ${!a.isDefault ? `<button type="button" class="small ghost" data-make-default="${esc(a.id)}" title="Usar como IA predeterminada">${icon('star', 11)} Predeterminar</button>` : ''}
+                    <button type="button" class="small ghost" data-test="${esc(a.id)}" ${a.installed ? '' : 'disabled'}>Verificar</button>
+                  </div>
+                </div>
+              </div>`
+            : ''
+        }
       </div>`;
     })
     .join('');
 }
 
 $('#teamPanel').addEventListener('click', async (e) => {
-  const id = e.target.dataset?.test;
-  if (!id) return;
-  e.target.disabled = true;
-  e.target.textContent = '…';
+  const toggleRow = e.target.closest('[data-toggle-team-agent]');
+  if (toggleRow && !e.target.closest('button')) {
+    const id = toggleRow.dataset.toggleTeamAgent;
+    expandedTeamAgents.has(id) ? expandedTeamAgents.delete(id) : expandedTeamAgents.add(id);
+    renderTeam();
+    return;
+  }
+
+  const defBtn = e.target.closest('[data-make-default]');
+  if (defBtn) {
+    const id = defBtn.dataset.makeDefault;
+    await api('POST', '/api/agents/catalog', { id, enabled: true, makeDefault: true });
+    await loadAgents(true);
+    return;
+  }
+
+  const testBtn = e.target.closest('[data-test]');
+  if (!testBtn) return;
+  const id = testBtn.dataset.test;
+  testBtn.disabled = true;
+  testBtn.textContent = '…';
   try {
     Object.assign(agentInfo(id), await api('POST', `/api/agents/${id}/test`));
   } catch (err) {
@@ -1606,22 +3231,67 @@ async function loadReview() {
   }
   rv.files = rv.info.files;
   const accepted = rv.files.filter((f) => f.accepted).length;
-  $('#rvSub').textContent = `Se aplicará a tu proyecto en la rama ${rv.info.projectBranch}${rv.info.projectDirty ? ' · tiene cambios sin guardar' : ''}`;
+  const hasSyntaxErr = Boolean(rv.info.syntaxErrors?.length);
+  const jsModified = rv.files.some((f) => /\.(m?js|cjs)$/i.test(f.file) && f.status !== 'D');
+  const syntaxBadge = hasSyntaxErr
+    ? ` · <span class="badge err" title="Hay errores de sintaxis en el código de las IAs">${icon('alertTriangle', 12)} Sintaxis JS errónea</span>`
+    : jsModified
+      ? ` · <span class="badge ok" title="Verificado con node --check">${icon('check', 12)} Sintaxis JS verificada</span>`
+      : '';
+
+  $('#rvSub').innerHTML = `Se aplicará a tu proyecto en la rama <b>${esc(rv.info.projectBranch)}</b>${
+    rv.info.projectDirty ? ' · <span class="error">tiene cambios sin guardar</span>' : ''
+  }${syntaxBadge}`;
   $('#rvCount').textContent = rv.files.length ? `${accepted}/${rv.files.length} aceptados` : '';
   $('#rvList').innerHTML = rv.files.length
     ? rv.files
         .map(
-          (f) => `<div class="rv-file ${rv.selected === f.file ? 'active' : ''} ${f.accepted ? 'ok' : ''}" data-rv-file="${esc(f.file)}" title="${esc(f.file)}">
-            <span class="rv-st st-${f.status}">${esc(f.status)}</span>
-            <span class="rv-name">${esc(f.file.split('/').pop())}<span class="muted small-text"> ${esc(f.file.split('/').slice(0, -1).join('/'))}</span></span>
-            <span class="rv-n"><span class="add">+${f.add}</span> <span class="del">-${f.del}</span></span>
-            <span class="rv-ok">${f.accepted ? icon('check', 14) : ''}</span>
-          </div>`,
+          (f) => {
+            const fileErr = rv.info.syntaxErrors?.find((s) => s.file === f.file);
+            return `<div class="rv-file ${rv.selected === f.file ? 'active' : ''} ${f.accepted ? 'ok' : ''} ${fileErr ? 'syntax-err' : ''}" data-rv-file="${esc(f.file)}" title="${esc(f.file)}${fileErr ? ` (Error: ${esc(fileErr.error)})` : ''}">
+              <span class="rv-st st-${f.status}">${esc(f.status)}</span>
+              <span class="rv-name">${esc(f.file.split('/').pop())}<span class="muted small-text"> ${esc(f.file.split('/').slice(0, -1).join('/'))}</span></span>
+              <span class="rv-n"><span class="add">+${f.add}</span> <span class="del">-${f.del}</span></span>
+              <span class="rv-ok">${fileErr ? icon('alertTriangle', 14) : f.accepted ? icon('check', 14) : ''}</span>
+            </div>`;
+          },
         )
         .join('')
     : '<p class="muted" style="padding:10px">No hay cambios pendientes: todo está aplicado en tu proyecto.</p>';
-  $('#rvApply').disabled = !rv.files.length;
-  $('#rvApply').textContent = rv.files.length ? `Aplicar al proyecto (${rv.files.length})` : 'Aplicar al proyecto';
+
+  if (hasSyntaxErr) {
+    const errText = rv.info.syntaxErrors.map((s) => `${s.file} (${s.error})`).join(' · ');
+    $('#rvMsg').innerHTML = `<span class="error">${icon('alertTriangle', 14)} <b>Error de sintaxis detectado:</b> ${esc(errText)}</span> <button type="button" class="small danger" id="rvFixSyntax">Pedir al equipo que lo corrija</button>`;
+    $('#rvFixSyntax')?.addEventListener('click', async () => {
+      if (rv.kind === 'chats' && state.chat) {
+        reviewDlg.close();
+        const fixPrompt = `Por favor corrige los siguientes errores de sintaxis detectados por la verificación automática antes de aplicar:\n${rv.info.syntaxErrors.map((s) => `- ${s.file}: ${s.error}`).join('\n')}`;
+        await api('POST', `/api/chats/${state.chat.id}/messages`, { text: fixPrompt });
+      } else {
+        alert(`Errores de sintaxis detectados:\n${rv.info.syntaxErrors.map((s) => `${s.file}: ${s.error}`).join('\n')}`);
+      }
+    });
+  } else if (rv.info.projectDirty) {
+    $('#rvMsg').innerHTML = `<div class="dirty-warning-box"><span class="error">${icon('alertTriangle', 14)} <b>Tu proyecto tiene cambios locales sin guardar (sin commit).</b></span> <button type="button" class="small primary" id="rvCommitProject">${icon('check', 13)} Guardar mis cambios en un commit</button></div>`;
+    $('#rvCommitProject')?.addEventListener('click', async () => {
+      try {
+        $('#rvCommitProject').disabled = true;
+        await api('POST', `${rvBase()}/commit-project`);
+        await loadReview();
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+  } else if (!$('#rvMsg').querySelector('.ok-text')) {
+    $('#rvMsg').innerHTML = '';
+  }
+
+  $('#rvApply').disabled = !rv.files.length || hasSyntaxErr;
+  $('#rvApply').textContent = rv.files.length
+    ? hasSyntaxErr
+      ? 'Bloqueado por error de sintaxis'
+      : `Aplicar al proyecto (${rv.files.length})`
+    : 'Aplicar al proyecto';
   $('#rvAcceptAll').hidden = !rv.files.some((f) => !f.accepted);
 }
 
@@ -1719,6 +3389,19 @@ $('#rvAcceptAll').addEventListener('click', async () => {
 });
 
 $('#rvApply').addEventListener('click', async () => {
+  if (rv.info.projectDirty) {
+    if (!confirm('Tu proyecto tiene cambios locales sin guardar. ¿Deseas hacer un commit de respaldo automático ahora para poder aplicar los cambios de las IAs?')) {
+      return;
+    }
+    try {
+      await api('POST', `${rvBase()}/commit-project`);
+      await loadReview();
+    } catch (err) {
+      alert(`No se pudo hacer commit de los cambios locales: ${err.message}`);
+      return;
+    }
+  }
+
   const pending = rv.files.filter((f) => !f.accepted).length;
   const msg = pending
     ? `Hay ${pending} archivo(s) sin revisar que también se aplicarán. ¿Aplicar los ${rv.files.length} cambios a tu proyecto (rama ${rv.info.projectBranch})?`
@@ -1726,9 +3409,11 @@ $('#rvApply').addEventListener('click', async () => {
   if (!confirm(msg)) return;
   $('#rvApply').disabled = true;
   try {
-    const r = await api('POST', `${rvBase()}/apply`);
+    const r = await api('POST', `${rvBase()}/apply`, { commitFirst: true });
     if (r.ok) {
-      $('#rvMsg').innerHTML = `<span class="ok-text">${icon('checkCircle')} Aplicados ${r.files} archivo(s) a la rama ${esc(r.branch)} de tu proyecto.</span>${
+      $('#rvMsg').innerHTML = `<span class="ok-text">${icon('checkCircle')} Aplicados ${r.files} archivo(s) a la rama ${esc(r.branch)} de tu proyecto.${
+        r.selfUpdate ? ' Punto de restauración creado.' : ''
+      }</span>${
         r.selfUpdate ? ' <button class="primary small" id="rvRestart">Reiniciar AITeam ahora</button> <span class="muted small-text">para ver los cambios</span>' : ''
       }`;
       $('#rvRestart')?.addEventListener('click', () => {
@@ -1742,6 +3427,26 @@ $('#rvApply').addEventListener('click', async () => {
         await hydrateRunCards();
         if (state.current?.id === rv.id) renderRun();
       }
+    } else if (r.reason === 'syntax') {
+      $('#rvMsg').innerHTML = `<span class="error">${icon('alertTriangle', 14)} ${esc(r.error)}</span> <button class="small danger" id="rvFixSyntax">Pedir al equipo que lo corrija</button>`;
+      $('#rvFixSyntax')?.addEventListener('click', async () => {
+        if (rv.kind === 'chats' && state.chat) {
+          reviewDlg.close();
+          const fixPrompt = `Por favor corrige los siguientes errores de sintaxis detectados por la verificación automática:\n${(r.syntaxErrors || []).map((s) => `- ${s.file}: ${s.error}`).join('\n')}`;
+          await api('POST', `/api/chats/${state.chat.id}/messages`, { text: fixPrompt });
+        }
+      });
+    } else if (r.reason === 'dirty') {
+      $('#rvMsg').innerHTML = `<div class="dirty-warning-box"><span class="error">${icon('alertTriangle', 14)} <b>${esc(r.error)}</b></span> <button type="button" class="small primary" id="rvCommitProject">${icon('check', 13)} Guardar mis cambios en un commit</button></div>`;
+      $('#rvCommitProject')?.addEventListener('click', async () => {
+        try {
+          $('#rvCommitProject').disabled = true;
+          await api('POST', `${rvBase()}/commit-project`);
+          await loadReview();
+        } catch (err) {
+          alert(err.message);
+        }
+      });
     } else if (r.reason === 'conflict' && rv.kind === 'chats') {
       $('#rvMsg').innerHTML = `<span class="error">${esc(r.error)}</span> <button class="small" id="rvFix">Que una IA lo resuelva</button>`;
       $('#rvFix').addEventListener('click', syncFromProject);
@@ -2146,6 +3851,25 @@ const ACCENTS = [
   ['cian', '#06b6d4'],
 ];
 
+const THEME_CHROME = {
+  oled: { bg: '#000000', text: '#f2f2f4', border: '#1c1c20', dark: true },
+  oscuro: { bg: '#1d1d1b', text: '#ecebe7', border: '#34332f', dark: true },
+  medianoche: { bg: '#11182b', text: '#e6ebff', border: '#243052', dark: true },
+  claro: { bg: '#ffffff', text: '#1d1c1a', border: '#e2e0db', dark: false },
+};
+
+function syncWindowTitlebar() {
+  const theme = document.documentElement.dataset.theme || 'oscuro';
+  const pal = THEME_CHROME[theme] ?? THEME_CHROME.oscuro;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', pal.bg);
+  fetch('/api/window-theme', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(pal),
+  }).catch(() => {});
+}
+
 function setLook(key, value) {
   document.documentElement.dataset[key] = value;
   try {
@@ -2153,8 +3877,10 @@ function setLook(key, value) {
   } catch {
     /* sin almacenamiento: solo para esta sesión */
   }
+  if (key === 'theme') syncWindowTitlebar();
   renderAppearance();
 }
+syncWindowTitlebar();
 
 function renderAppearance() {
   const theme = document.documentElement.dataset.theme;
@@ -2374,9 +4100,17 @@ function levelButtons(current) {
 function fillLevelSelects(root = document) {
   for (const sel of root.querySelectorAll('select[data-levels]')) {
     const value = sel.value || state.defaultAutonomy;
-    sel.innerHTML = state.levels.map((l) => `<option value="${l.id}">${esc(`${l.label}: ${l.short}`)}</option>`).join('');
+    const isPill = sel.classList.contains('pill-native-select') || sel.classList.contains('pill-select');
+    sel.innerHTML = state.levels
+      .map((l) => {
+        const text = isPill
+          ? (l.id === 'edits' ? 'Solo archivos' : l.id === 'project' ? 'Comandos' : 'Control total')
+          : `${l.label}: ${l.short}`;
+        return `<option value="${l.id}">${esc(text)}</option>`;
+      })
+      .join('');
     if (value && state.levels.some((l) => l.id === value)) sel.value = value;
-    const hint = sel.parentElement.querySelector('[data-level-hint]');
+    const hint = sel.parentElement?.querySelector('[data-level-hint]');
     const show = () => hint && (hint.textContent = levelInfo(sel.value).guarantees);
     sel.onchange = show;
     show();
@@ -2394,6 +4128,425 @@ $('#shutdownBtn').addEventListener('click', async () => {
   document.body.innerHTML = '<div class="empty"><h1>AITeam está apagado</h1><p>Ábrelo de nuevo desde el acceso directo del escritorio. Ya puedes cerrar esta ventana.</p></div>';
 });
 
+// ------------------------------------------------------------ guía rápida / tour
+
+function openHelpModal() {
+  let dlg = document.getElementById('helpTourDlg');
+  if (!dlg) {
+    dlg = document.createElement('dialog');
+    dlg.id = 'helpTourDlg';
+    dlg.className = 'help-tour-dlg';
+    dlg.innerHTML = `
+      <div class="dialog-head">
+        <div>
+          <h2>Cómo funciona AITeam</h2>
+          <p class="muted small-text">Tus IAs trabajando en equipo sobre tu código de forma segura</p>
+        </div>
+        <button class="ghost dlg-x" data-close title="Cerrar (Esc)" aria-label="Cerrar">${icon('close', 16)}</button>
+      </div>
+      <div class="help-grid">
+        <div class="help-card">
+          <span class="help-badge">1 · Elige tu carpeta</span>
+          <h3>Sin configurar nada complicado</h3>
+          <p class="muted">Usa <b>${icon('folder', 13)} Examinar…</b> para seleccionar la carpeta de tu proyecto. Si aún no tenía git, AITeam la prepara sola.</p>
+        </div>
+        <div class="help-card">
+          <span class="help-badge">2 · Elige cómo trabajan</span>
+          <h3>Una IA, todas o en paralelo</h3>
+          <p class="muted">En la barra sobre el cuadro de texto eliges si responde una IA concreta, si opinan todas (<b>Todo el equipo</b>) o si se dividen subtareas en paralelo (<b>Tarea en paralelo</b>).</p>
+        </div>
+        <div class="help-card">
+          <span class="help-badge">3 · Revisa antes de aplicar</span>
+          <h3>Tu proyecto original está protegido</h3>
+          <p class="muted">Las IAs editan en una copia aislada. Pulsa <b>Revisar y aplicar cambios</b> para ver qué archivos tocaron, aceptar los que te gusten y pasarlos a tu carpeta real.</p>
+        </div>
+        <div class="help-card">
+          <span class="help-badge">4 · Permisos claros</span>
+          <h3>Tú decides hasta dónde llegan</h3>
+          <p class="muted">En la píldora inferior del chat puedes elegir entre <b>Solo editar archivos</b>, <b>Comandos seguros</b> (tests y builds sin instalar nada) o <b>Control total</b>.</p>
+        </div>
+      </div>
+      <div class="dialog-actions">
+        <button class="primary" data-close>Entendido, empezar</button>
+      </div>`;
+    document.body.append(dlg);
+    dlg.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => dlg.close()));
+  }
+  dlg.showModal();
+  localStorage.setItem('aiteam.tourSeen', '1');
+}
+
+// ------------------------------------------------------------ vista previa web en vivo y detector de puertos
+
+state.activePorts = [];
+
+function normalizePreviewUrl(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return 'http://localhost:3000';
+  if (/^:?\d{2,5}(\/.*)?$/.test(s)) return `http://localhost:${s.replace(/^:/, '')}`;
+  if (!/^https?:\/\//i.test(s)) return `http://${s}`;
+  return s;
+}
+
+async function refreshPreviewPorts(autoLoadFirst = false) {
+  const strip = $('#previewPortsStrip');
+  try {
+    const { ports } = await api('GET', '/api/ports');
+    state.activePorts = ports ?? [];
+    if (strip) {
+      if (state.activePorts.length) {
+        strip.hidden = false;
+        strip.innerHTML =
+          `<span class="ports-label"><span class="dot ok"></span> Puertos activos:</span>` +
+          state.activePorts
+            .map((p) => `<button type="button" class="port-pill" data-port-url="${esc(p.url)}">:${p.port}</button>`)
+            .join('');
+      } else {
+        strip.hidden = false;
+        strip.innerHTML = `<span class="muted small-text">Ningún servidor dev detectado en puertos comunes (3000, 5173, 8080…). Escribe una URL arriba.</span>`;
+      }
+    }
+    if (autoLoadFirst && state.activePorts.length && !$('#previewFrame')?.getAttribute('src')) {
+      navigatePreview(state.activePorts[0].url);
+    }
+  } catch {
+    /* ignorar */
+  }
+}
+
+function navigatePreview(rawUrl) {
+  const url = normalizePreviewUrl(rawUrl);
+  const inp = $('#previewUrlInput');
+  const frame = $('#previewFrame');
+  if (inp) inp.value = url;
+  if (frame) frame.src = url;
+  localStorage.setItem('aiteam.previewUrl', url);
+}
+
+function openPreviewPanel(initialUrl) {
+  const panel = $('#previewPanel');
+  if (!panel) return;
+  panel.hidden = false;
+  $('#layout')?.classList.add('with-preview');
+  const saved = initialUrl || localStorage.getItem('aiteam.previewUrl') || '';
+  if (saved) navigatePreview(saved);
+  refreshPreviewPorts(!saved);
+}
+
+function closePreviewPanel() {
+  const panel = $('#previewPanel');
+  if (!panel) return;
+  panel.hidden = true;
+  $('#layout')?.classList.remove('with-preview');
+}
+
+function togglePreviewPanel(url) {
+  const panel = $('#previewPanel');
+  if (!panel) return;
+  if (panel.hidden) openPreviewPanel(url);
+  else if (url) navigatePreview(url);
+  else closePreviewPanel();
+}
+
+$('#previewCloseBtn')?.addEventListener('click', closePreviewPanel);
+$('#previewReloadBtn')?.addEventListener('click', () => {
+  const frame = $('#previewFrame');
+  if (frame?.src) frame.src = frame.src;
+  refreshPreviewPorts(false);
+});
+$('#previewExternalBtn')?.addEventListener('click', () => {
+  const url = normalizePreviewUrl($('#previewUrlInput')?.value || 'http://localhost:3000');
+  window.open(url, '_blank', 'noopener');
+});
+$('#previewUrlInput')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    navigatePreview(e.target.value);
+  }
+});
+$('#previewPortsStrip')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-port-url]');
+  if (btn) navigatePreview(btn.dataset.portUrl);
+});
+
+// ------------------------------------------------------------ paleta de comandos (Ctrl+K) y recetas de equipo
+
+const TEAM_RECIPES = [
+  {
+    id: 'recipe-audit',
+    title: 'Receta · Auditoría de Seguridad y Bugs',
+    subtitle: 'Todo el equipo (@equipo) busca vulnerabilidades, errores y casos límite',
+    target: 'equipo',
+    prompt: 'Realicen una auditoría exhaustiva de seguridad, vulnerabilidades, fugas de datos y casos límite en este proyecto, priorizando los hallazgos más críticos.',
+    ico: 'shield',
+  },
+  {
+    id: 'recipe-refactor',
+    title: 'Receta · Refactorizar + Tests en Paralelo',
+    subtitle: 'Divide el trabajo en subtareas paralelas (/equipo) y verifica el resultado',
+    target: 'parallel',
+    prompt: 'Identifiquen los módulos más complejos o frágiles, refactorícenlos para mejorar su mantenibilidad y añadan pruebas automatizadas para cubrir los casos clave.',
+    ico: 'bolt',
+  },
+  {
+    id: 'recipe-pr',
+    title: 'Receta · Revisión Pre-PR / Control de Calidad',
+    subtitle: 'Revisión cruzada entre todas las IAs antes de integrar cambios',
+    target: 'equipo',
+    prompt: 'Revisen el estado actual del repositorio buscando posibles regresiones, código duplicado, problemas de rendimiento o mejoras antes de publicar.',
+    ico: 'fileDiff',
+  },
+  {
+    id: 'recipe-ux',
+    title: 'Receta · Pulido de Interfaz y Experiencia de Usuario',
+    subtitle: 'Mejora visual, diseño responsivo y facilidad de uso',
+    target: 'auto',
+    prompt: 'Analiza y mejora la interfaz de usuario, cuidando la consistencia visual, accesibilidad, estados vacíos y facilidad de uso.',
+    ico: 'palette',
+  },
+  {
+    id: 'recipe-docs',
+    title: 'Receta · Documentar Arquitectura y Guía Rápida',
+    subtitle: 'Explica la estructura del proyecto y genera documentación clara',
+    target: 'equipo',
+    prompt: 'Analicen la arquitectura completa de este proyecto y generen o actualicen su documentación técnica y guía de inicio rápido.',
+    ico: 'file',
+  },
+];
+
+async function runTeamRecipe(recipe) {
+  if (state.view === 'chat' && state.chat) {
+    const inp = $('#chatInput');
+    const targetKey = `aiteam.target.${state.chat.id}`;
+    localStorage.setItem(targetKey, recipe.target);
+    if (inp) {
+      inp.value = recipe.prompt;
+      inp.dispatchEvent(new Event('input'));
+      inp.focus();
+    }
+    openChat(state.chat.id);
+    return;
+  }
+  if (state.view !== 'welcome') showWelcome();
+  const inp = $('#welcomeInput');
+  const sel = $('#welcomeTargetSel');
+  if (sel) sel.value = recipe.target;
+  if (inp) {
+    inp.value = recipe.prompt;
+    inp.focus();
+  }
+}
+
+let cmdSelectedIdx = 0;
+let cmdFilteredItems = [];
+
+function buildCmdPaletteItems() {
+  const items = [];
+  for (const r of TEAM_RECIPES) {
+    items.push({
+      group: 'Recetas de Equipo (1 clic)',
+      title: r.title,
+      subtitle: r.subtitle,
+      ico: r.ico,
+      badge: r.target === 'parallel' ? 'Paralelo' : r.target === 'equipo' ? '@equipo' : 'IA',
+      run: () => runTeamRecipe(r),
+    });
+  }
+
+  items.push(
+    {
+      group: 'Acciones rápidas',
+      title: 'Nueva sesión de equipo',
+      subtitle: 'Ir a la pantalla de inicio para elegir carpeta, modelo o modo',
+      ico: 'plus',
+      badge: 'Vista',
+      run: () => showWelcome(),
+    },
+    {
+      group: 'Acciones rápidas',
+      title: 'Nueva tarea en paralelo',
+      subtitle: 'Dividir un objetivo grande en subtareas simultáneas con revisión cruzada',
+      ico: 'bolt',
+      badge: 'Paralelo',
+      run: () => showNew(),
+    },
+    {
+      group: 'Acciones rápidas',
+      title: 'Abrir / Cerrar Vista previa web en vivo',
+      subtitle: 'Previsualizar servidor local (localhost:3000, 5173…) junto al chat',
+      ico: 'globe',
+      badge: 'Preview',
+      run: () => togglePreviewPanel(),
+    },
+    {
+      group: 'Acciones rápidas',
+      title: 'Catálogo de Agentes (45 IAs estilo Orca)',
+      subtitle: 'Activar o desactivar CLIs, personalizar comandos y elegir predeterminado',
+      ico: 'cpu',
+      badge: '45 agents',
+      run: () => openOrcaCatalog(),
+    },
+  );
+
+  if (state.view === 'chat' && state.chat) {
+    items.push(
+      {
+        group: 'Conversación actual',
+        title: 'Revisar y aplicar cambios al proyecto',
+        subtitle: state.chat.title,
+        ico: 'fileDiff',
+        badge: 'Diff',
+        run: () => openReview('chats', state.chat.id),
+      },
+      {
+        group: 'Conversación actual',
+        title: 'Explorar archivos de esta conversación',
+        subtitle: state.chat.worktree?.path ?? '',
+        ico: 'folder',
+        badge: 'Archivos',
+        run: () => openFiles(state.chat.worktree.path, 'copia de la conversación'),
+      },
+      {
+        group: 'Conversación actual',
+        title: 'Abrir Herramientas (Terminal, Comandos, MCP y Versiones)',
+        subtitle: 'Ejecutar comandos o restaurar snapshots de esta copia',
+        ico: 'terminal',
+        badge: 'Tools',
+        run: () => openChatTools(),
+      },
+    );
+  }
+
+  for (const p of state.projects ?? []) {
+    items.push({
+      group: 'Proyectos vinculados',
+      title: `Proyecto: ${p.name}`,
+      subtitle: p.path,
+      ico: 'folder',
+      badge: 'Abrir',
+      run: () => showWelcome(p.path),
+    });
+  }
+
+  for (const c of (state.chats ?? []).slice(0, 12)) {
+    const projName = (c.repoPath ?? '').split(/[\\/]/).pop() || '';
+    items.push({
+      group: 'Sesiones recientes',
+      title: c.title,
+      subtitle: `${projName} · Conversación`,
+      ico: 'chat',
+      badge: 'Sesión',
+      run: () => openChat(c.id),
+    });
+  }
+
+  for (const [id, label] of THEMES) {
+    items.push({
+      group: 'Apariencia y Ajustes',
+      title: `Cambiar tema a ${label}`,
+      subtitle: 'Actualiza el aspecto visual al instante',
+      ico: 'palette',
+      badge: 'Tema',
+      run: () => setLook('theme', id),
+    });
+  }
+  items.push({
+    group: 'Apariencia y Ajustes',
+    title: 'Abrir Ajustes de AITeam',
+    subtitle: 'Permisos, voz local Whisper, notificaciones y servidor',
+    ico: 'settings',
+    badge: 'Ajustes',
+    run: () => $('#settingsBtn')?.click(),
+  });
+
+  return items;
+}
+
+function renderCmdPaletteList() {
+  const listEl = $('#cmdPaletteList');
+  const q = ($('#cmdPaletteInput')?.value ?? '').trim().toLowerCase();
+  const all = buildCmdPaletteItems();
+  cmdFilteredItems = q
+    ? all.filter((it) => it.title.toLowerCase().includes(q) || it.subtitle.toLowerCase().includes(q) || it.group.toLowerCase().includes(q))
+    : all;
+
+  if (cmdSelectedIdx >= cmdFilteredItems.length) cmdSelectedIdx = Math.max(0, cmdFilteredItems.length - 1);
+  if (!cmdFilteredItems.length) {
+    listEl.innerHTML = `<p class="muted" style="padding:22px;text-align:center">No hay comandos ni sesiones que coincidan con «${esc(q)}».</p>`;
+    return;
+  }
+
+  let html = '';
+  let lastGroup = '';
+  cmdFilteredItems.forEach((it, idx) => {
+    if (it.group !== lastGroup) {
+      lastGroup = it.group;
+      html += `<div class="cmd-group-title">${esc(it.group)}</div>`;
+    }
+    html += `<button type="button" class="cmd-item ${idx === cmdSelectedIdx ? 'active' : ''}" data-cmd-idx="${idx}">
+      <span class="cmd-item-ico">${icon(it.ico, 16)}</span>
+      <span class="cmd-item-copy">
+        <b>${esc(it.title)}</b>
+        <small>${esc(it.subtitle)}</small>
+      </span>
+      ${it.badge ? `<span class="cmd-item-badge">${esc(it.badge)}</span>` : ''}
+    </button>`;
+  });
+  listEl.innerHTML = html;
+  listEl.querySelector('.cmd-item.active')?.scrollIntoView({ block: 'nearest' });
+}
+
+function openCmdPalette() {
+  const dlg = $('#cmdPaletteDlg');
+  if (!dlg) return;
+  if (dlg.open) {
+    dlg.close();
+    return;
+  }
+  const inp = $('#cmdPaletteInput');
+  if (inp) inp.value = '';
+  cmdSelectedIdx = 0;
+  renderCmdPaletteList();
+  dlg.showModal();
+  inp?.focus();
+}
+
+$('#openCmdPaletteBtn')?.addEventListener('click', openCmdPalette);
+$('#cmdPaletteInput')?.addEventListener('input', () => {
+  cmdSelectedIdx = 0;
+  renderCmdPaletteList();
+});
+$('#cmdPaletteInput')?.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    cmdSelectedIdx = (cmdSelectedIdx + 1) % Math.max(1, cmdFilteredItems.length);
+    renderCmdPaletteList();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    cmdSelectedIdx = (cmdSelectedIdx - 1 + Math.max(1, cmdFilteredItems.length)) % Math.max(1, cmdFilteredItems.length);
+    renderCmdPaletteList();
+  } else if (e.key === 'Enter' && cmdFilteredItems[cmdSelectedIdx]) {
+    e.preventDefault();
+    const chosen = cmdFilteredItems[cmdSelectedIdx];
+    $('#cmdPaletteDlg')?.close();
+    chosen.run();
+  }
+});
+$('#cmdPaletteList')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-cmd-idx]');
+  if (!btn) return;
+  const chosen = cmdFilteredItems[Number(btn.dataset.cmdIdx)];
+  $('#cmdPaletteDlg')?.close();
+  chosen?.run();
+});
+
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    openCmdPalette();
+  }
+});
+
 // ------------------------------------------------------------ arranque
 
 await loadAgents();
@@ -2407,7 +4560,99 @@ await Promise.all([loadRuns(), loadChats(), loadProjects(), loadUsage(), loadSpe
 // Estado inicial para detectar cambios (y no avisar de lo que ya había pasado).
 for (const c of state.chats) prevChatWorking.set(c.id, Boolean(c.working));
 for (const r of state.runs) prevRunStatus.set(r.id, r.status);
-const lastChat = localStorage.getItem('aiteam.chat');
-if (lastChat && state.chats.some((c) => c.id === lastChat)) openChat(lastChat);
-else if (state.chats.length) openChat(state.chats[0].id);
-else showAddProject();
+showWelcome();
+if (!localStorage.getItem('aiteam.tourSeen') && !navigator.webdriver && !/Headless/i.test(navigator.userAgent)) {
+  setTimeout(() => openHelpModal(), 400);
+}
+
+// ------------------------------------------------------------ Rollback de auto-mejora
+$('#settingsRollbackBtn')?.addEventListener('click', async () => {
+  if (!confirm('¿Deseas revertir AITeam a la versión anterior a la auto-mejora? Se restaurarán los archivos y el servidor se reiniciará automáticamente.')) return;
+  $('#settingsDlg')?.close();
+  try {
+    const res = await api('POST', '/api/app/rollback');
+    if (res.ok) {
+      showRestarting();
+    }
+  } catch (err) {
+    alert(`Error al revertir: ${err.message}`);
+  }
+});
+
+// ------------------------------------------------------------ Live Error Doctor (reparación asistida)
+let lastDoctorError = null;
+let doctorToast = null;
+
+function ensureDoctorToast() {
+  if (doctorToast) return doctorToast;
+  doctorToast = document.createElement('div');
+  doctorToast.id = 'liveDoctorToast';
+  doctorToast.className = 'live-doctor-toast';
+  doctorToast.hidden = true;
+  document.body.append(doctorToast);
+  return doctorToast;
+}
+
+function handleLiveDoctorError(err, source, lineno, colno) {
+  const message = err?.message || String(err || 'Error inesperado');
+  const now = Date.now();
+  if (lastDoctorError && lastDoctorError.message === message && now - lastDoctorError.time < 5000) return;
+  lastDoctorError = { message, source, lineno, colno, stack: err?.stack || '', time: now };
+
+  const toast = ensureDoctorToast();
+  toast.innerHTML = `
+    <div class="doctor-icon">${icon('alertTriangle', 18)}</div>
+    <div class="doctor-content">
+      <div class="doctor-title">AITeam Error Doctor</div>
+      <div class="doctor-msg" title="${esc(message)}">${esc(message)}</div>
+      <div class="doctor-src muted small-text">${esc(source ? `${source.split('/').pop()}:${lineno || ''}` : 'en ejecución')}</div>
+    </div>
+    <div class="doctor-actions">
+      <button type="button" class="primary small" id="doctorFixBtn">${icon('bolt', 13)} Corregir con el equipo</button>
+      <button type="button" class="ghost icon-only-sm" id="doctorCloseBtn" title="Descartar">${icon('close', 14)}</button>
+    </div>
+  `;
+  toast.hidden = false;
+
+  toast.querySelector('#doctorCloseBtn')?.addEventListener('click', () => {
+    toast.hidden = true;
+  });
+
+  toast.querySelector('#doctorFixBtn')?.addEventListener('click', async () => {
+    toast.hidden = true;
+    try {
+      const { root } = await api('GET', '/api/app');
+      let targetChat = state.chats.find((c) => normPath(c.repoPath) === normPath(root));
+      if (!targetChat) {
+        await api('POST', '/api/projects', { path: root, prepare: true });
+        await loadProjects();
+        targetChat = await api('POST', '/api/chats', { repoPath: root, agents: usableAgents() });
+        await loadChats();
+      }
+      openChat(targetChat.id);
+      const stackSnippet = lastDoctorError.stack ? `\n\nStack:\n\`\`\`\n${lastDoctorError.stack.slice(0, 1500)}\n\`\`\`` : '';
+      const prompt = `🚨 **Error detectado por el Live Error Doctor**:\n\n**Mensaje**: \`${lastDoctorError.message}\`\n**Ubicación**: \`${lastDoctorError.source || 'app'}:${lastDoctorError.lineno || ''}\`${stackSnippet}\n\nPor favor analicen el archivo, ubiquen la causa del problema y apliquen la corrección correspondiente para mantener el sistema 100% estable.`;
+      
+      const input = $('#chatInput');
+      if (input) {
+        input.value = prompt;
+        input.focus();
+        $('#chatForm')?.dispatchEvent(new Event('submit', { cancelable: true }));
+      }
+    } catch (e) {
+      alert(`No se pudo enviar al equipo: ${e.message}`);
+    }
+  });
+}
+
+window.addEventListener('error', (e) => {
+  if (e.filename && !e.filename.includes(location.host) && !e.filename.includes('127.0.0.1')) return;
+  handleLiveDoctorError(e.error || e.message, e.filename, e.lineno, e.colno);
+});
+
+window.addEventListener('unhandledrejection', (e) => {
+  handleLiveDoctorError(e.reason || 'Promesa rechazada');
+});
+
+
+

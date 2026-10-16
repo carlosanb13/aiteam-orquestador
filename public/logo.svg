@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="AITeam: agentes conectados en un equipo">
+  <rect width="512" height="512" rx="112" fill="#171923"/>
+  <g fill="none" stroke="#77829b" stroke-width="16" stroke-linecap="round">
+    <path d="M256 256 256 104M256 256 388 180M256 256 388 332M256 256 256 408M256 256 124 332M256 256 124 180"/>
+  </g>
+  <g fill="#64d8c4">
+    <circle cx="256" cy="90" r="27"/><circle cx="400" cy="173" r="27"/>
+    <circle cx="400" cy="339" r="27"/><circle cx="256" cy="422" r="27"/>
+    <circle cx="112" cy="339" r="27"/><circle cx="112" cy="173" r="27"/>
+  </g>
+  <circle cx="256" cy="256" r="69" fill="#e9e8ff"/>
+  <path d="M227 255h58M256 226v58" stroke="#26243f" stroke-width="15" stroke-linecap="round"/>
+</svg>

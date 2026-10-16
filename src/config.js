@@ -20,6 +20,26 @@ export const DEFAULT_CONFIG = {
   compaction: { enabled: true, thresholdChars: 60_000, keepRecent: 12, agent: '', model: '', timeoutMinutes: 5 },
   // Reglas del proyecto (AGENTS.md o CLAUDE.md) que se añaden al contexto de las IAs; se recortan a este tamaño.
   projectRules: { enabled: true, maxChars: 20_000 },
+  // Orquestación predeterminada para tareas en equipo.
+  orchestration: {
+    defaultCoordinator: 'claude',
+    crossReview: true,
+    adversarial: false,
+    autoApprove: true,
+  },
+  // Git y copias de trabajo.
+  git: {
+    autoInit: true,
+    branchPrefix: 'aiteam/',
+    autoCleanWorktrees: false,
+  },
+  // Entrada, edición y navegador.
+  editor: {
+    sendWithEnter: true,
+    spellcheck: true,
+    density: 'comfortable',
+    defaultPreviewUrl: 'http://localhost:3000',
+  },
   customAgents: {},
   agents: {
     claude: {

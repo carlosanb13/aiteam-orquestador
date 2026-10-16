@@ -361,6 +361,7 @@ export class Orchestrator extends EventEmitter {
     const run = this.runs.get(id);
     if (!run) throw new Error('No existe esa tarea.');
     run.cancelled = true;
+    run.paused = false;
     this.bus.cancel(run);
     for (const child of this.procs.get(id) ?? []) {
       child.cancelled = true;
@@ -371,17 +372,40 @@ export class Orchestrator extends EventEmitter {
     return this.publicRun(run);
   }
 
-  /** Continúa una tarea interrumpida conservando subtareas terminadas y ramas de los agentes. */
+  /** Pausa una tarea en curso conservando subtareas completadas y ramas para reanudar más tarde. */
+  pause(id) {
+    const run = this.runs.get(id);
+    if (!run) throw new Error('No existe esa tarea.');
+    if (!ACTIVE.has(run.status)) throw new Error('La tarea no está activa para pausarse.');
+    run.paused = true;
+    run.cancelled = true;
+    this.bus.cancel(run);
+    for (const child of this.procs.get(id) ?? []) {
+      child.cancelled = true;
+      killTree(child);
+    }
+    for (const t of run.tasks) {
+      if (['running', 'waiting_reply', 'escalated'].includes(t.status)) {
+        t.status = 'pending';
+      }
+    }
+    this.setStatus(run, 'paused', 'Tarea en pausa');
+    this.log(run, null, '⏸ Tarea pausada por el usuario. Subtareas completadas y ramas a salvo.');
+    return this.publicRun(run);
+  }
+
+  /** Continúa una tarea interrumpida o pausada conservando subtareas terminadas y ramas de los agentes. */
   async resume(id) {
     const run = this.runs.get(id);
     if (!run) throw new Error('No existe esa tarea.');
-    if (run.status !== 'interrupted' || run.cleaned) throw new Error('Esta tarea no se puede reanudar.');
+    if (!['interrupted', 'paused'].includes(run.status) || run.cleaned) throw new Error('Esta tarea no se puede reanudar.');
     if (run.integration) {
       run.previousIntegrations ??= [];
       run.previousIntegrations.push(run.integration);
       run.integrationRevision = (run.integrationRevision ?? 0) + 1;
     }
     run.integration = null;
+    run.paused = false;
     run.cancelled = false;
     run.error = null;
     for (const task of run.tasks) {
@@ -399,7 +423,7 @@ export class Orchestrator extends EventEmitter {
   async cleanup(id) {
     const run = this.runs.get(id);
     if (!run) throw new Error('No existe esa tarea.');
-    if (ACTIVE.has(run.status)) throw new Error('Cancela la tarea antes de limpiar sus copias.');
+    if (ACTIVE.has(run.status) || run.status === 'paused') throw new Error('Cancela la tarea antes de limpiar sus copias.');
     const paths = Object.values(run.worktrees).map((w) => w.path);
     if (run.integration?.worktree) paths.push(run.integration.worktree);
     for (const previous of run.previousIntegrations ?? []) if (previous.worktree) paths.push(previous.worktree);

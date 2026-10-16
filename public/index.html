@@ -10,10 +10,13 @@
     <link rel="apple-touch-icon" href="icon-192.png" />
     <meta name="theme-color" content="#1d1d1b" />
     <script>
-      // Aplica el tema guardado antes de pintar, para que no parpadee.
+      // Aplica el tema guardado antes de pintar, para que no parpadee ni cambie el color de la barra superior.
       try {
-        document.documentElement.dataset.theme = localStorage.getItem('aiteam.theme') || 'oscuro';
+        const t = localStorage.getItem('aiteam.theme') || 'oscuro';
+        document.documentElement.dataset.theme = t;
         document.documentElement.dataset.accent = localStorage.getItem('aiteam.accent') || 'azul';
+        const bg = { oled: '#000000', oscuro: '#1d1d1b', medianoche: '#11182b', claro: '#ffffff' }[t] || '#1d1d1b';
+        document.querySelector('meta[name="theme-color"]')?.setAttribute('content', bg);
       } catch {}
     </script>
   </head>
@@ -21,21 +24,63 @@
     <div class="layout" id="layout">
       <aside class="sidebar">
         <div class="brand">
-          <img class="brand-mark" src="logo-ai-icon-transparent.png" width="32" height="32" alt="" />
-          <span class="brand-name">team</span>
+          <button id="homeBtn" class="brand-home ghost" title="Ir al inicio (nueva sesión)">
+            <img class="brand-mark" src="logo-ai-icon-transparent.png" width="30" height="30" alt="" />
+            <span class="brand-name">team</span>
+          </button>
           <span id="mockBadge" class="badge warn" hidden>simulación</span>
-          <button id="settingsBtn" class="ghost icon-btn" title="Ajustes" aria-label="Ajustes"><svg class="i" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+          <button id="tourBtn" class="ghost icon-btn" title="Cómo funciona AITeam (guía rápida)" aria-label="Guía rápida"><svg class="i" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.5-3 4"/><path d="M12 17h.01"/></svg></button>
+          <button id="settingsBtn" class="ghost icon-btn" title="Ajustes" aria-label="Ajustes"><svg class="i" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+        </div>
+
+        <div class="sidebar-top-nav">
+          <div class="sidebar-search">
+            <svg class="i" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input id="sidebarSearch" placeholder="Buscar sesión…" autocomplete="off" />
+            <button type="button" id="openCmdPaletteBtn" class="kbd-btn ghost" title="Paleta de comandos y recetas (Ctrl+K)">Ctrl+K</button>
+          </div>
+          <button id="newSessionBtn" class="nav-item nav-primary active-nav" type="button">
+            <svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            <span>Nueva sesión</span>
+          </button>
+          <button id="quickTaskBtn" class="nav-item" type="button" title="Varias IAs se reparten un objetivo en paralelo y se revisan entre sí">
+            <svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>
+            <span>Tarea en paralelo</span>
+          </button>
+          <button id="openCatalogNavBtn" class="nav-item" type="button" title="Explorar y activar agentes del catálogo (45 IAs disponibles)">
+            <svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>
+            <span>Catálogo de agentes</span>
+            <span class="nav-pill-count" id="catalogCountBadge">45</span>
+          </button>
+          <button id="selfDevBtn" class="nav-item" type="button" title="Abrir un chat para mejorar AITeam con tu equipo de IAs">
+            <svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0 5 5L21 13l-8 8-3-3 8-8M9.5 14.5 3 21"/><path d="M14.7 6.3 17 4"/></svg>
+            <span>Mejorar AITeam</span>
+          </button>
         </div>
 
         <div class="sidebar-scroll">
-          <div class="sidebar-title row-title">Proyectos <button id="addProjectBtn" class="small ghost" title="Añadir proyecto">+ Añadir</button></div>
+          <div class="sidebar-title row-title">
+            <div class="sidebar-sec-left">
+              <span>Proyectos</span>
+              <button id="toggleSidebarGroup" class="tiny-pill ghost" type="button" title="Cambiar agrupación (Por carpeta / Recientes)">Carpetas</button>
+            </div>
+            <button id="addProjectBtn" class="small ghost nowrap-btn" title="Elegir carpeta de proyecto">+ Carpeta</button>
+          </div>
           <div id="projectTree" class="project-tree"></div>
-          <button id="selfDevBtn" class="small ghost self-dev-btn" title="Abrir un chat para mejorar AITeam con tu equipo de IAs">Mejorar AITeam</button>
         </div>
 
         <div class="team-panel">
-          <div class="sidebar-title row-title">Equipo y uso <span><button id="addAgentBtn" class="small ghost" title="Añadir IA">+ IA</button><button id="refreshUsage" class="small ghost" title="Actualizar el uso (consulta mínima a Claude)"><svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></svg></button></span></div>
-          <div id="teamPanel"></div>
+          <div class="sidebar-title row-title">
+            <div class="sidebar-sec-left">
+              <span>Tu equipo de IAs</span>
+              <span id="activeTeamCount" class="tiny-count"></span>
+            </div>
+            <span class="team-head-actions">
+              <button id="addAgentBtn" class="small ghost" title="Administrar catálogo de agentes de IA">+ Agentes</button>
+              <button id="refreshUsage" class="small ghost icon-only-sm" title="Actualizar la cuota disponible"><svg class="i" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></svg></button>
+            </span>
+          </div>
+          <div id="teamPanel" class="team-compact-list"></div>
         </div>
       </aside>
 
@@ -51,58 +96,86 @@
         <div id="filesTree" class="files-tree"></div>
         <div id="fileView" class="file-view" hidden></div>
       </aside>
+
+      <aside class="preview-panel" id="previewPanel" hidden>
+        <div class="preview-head">
+          <div class="preview-url-bar">
+            <svg class="i" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>
+            <input id="previewUrlInput" value="http://localhost:3000" placeholder="http://localhost:3000" autocomplete="off" />
+          </div>
+          <div class="preview-actions">
+            <button type="button" class="small ghost icon-only-sm" id="previewReloadBtn" title="Recargar vista previa"><svg class="i" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></svg></button>
+            <button type="button" class="small ghost icon-only-sm" id="previewExternalBtn" title="Abrir en el navegador externo"><svg class="i" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></button>
+            <button type="button" class="small ghost icon-only-sm" id="previewCloseBtn" title="Cerrar vista previa"><svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+          </div>
+        </div>
+        <div class="preview-ports-strip" id="previewPortsStrip"></div>
+        <iframe id="previewFrame" class="preview-frame" title="Vista previa en vivo"></iframe>
+      </aside>
     </div>
 
     <template id="addProjectTpl">
       <section class="panel narrow">
-        <h1>Añadir un proyecto</h1>
-        <p class="muted">Añade la carpeta de un repositorio git con al menos un commit. Después podrás conversar con el equipo o encargarle una tarea.</p>
-        <p class="muted">Siguiente paso: pega la ruta de tu proyecto y abre la primera conversación.</p>
+        <h1>Añadir carpeta de proyecto</h1>
+        <p class="muted">Elige la carpeta de tu proyecto en tu ordenador. Si todavía no tiene control de versiones (git), AITeam la preparará automáticamente para trabajar en una copia segura sin tocar tus archivos originales hasta que apruebes los cambios.</p>
         <form id="addProjectForm" class="form">
           <label>
             <span>Carpeta del proyecto</span>
-            <input name="path" required placeholder="C:\Users\tu-usuario\proyectos\mi-app" autocomplete="off" />
+            <div class="path-picker-row">
+              <input name="path" required placeholder="C:\Users\tu-usuario\proyectos\mi-app" autocomplete="off" />
+              <button type="button" data-pick-folder class="pick-folder-btn"><svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg> <span>Examinar…</span></button>
+            </div>
           </label>
+          <p class="muted small-text" data-folder-hint hidden></p>
           <p class="error" data-form-error hidden></p>
-          <button class="primary" type="submit">Añadir y abrir una conversación</button>
+          <div class="actions">
+            <button class="primary" type="submit">Añadir y empezar</button>
+          </div>
         </form>
       </section>
     </template>
 
     <template id="newRunTpl">
       <section class="panel narrow">
-        <h1>Nueva tarea para el equipo</h1>
-        <p class="muted">Describe el resultado que buscas. El equipo preparará un plan, repartirá las subtareas, trabajará en copias aisladas y revisará los cambios antes de integrarlos.</p>
-        <p class="muted">Al terminar, podrás revisar el resultado antes de aplicarlo a tu proyecto.</p>
+        <h1>Encargar tarea en paralelo al equipo</h1>
+        <p class="muted">Describe el objetivo completo. Una IA coordinadora dividirá el trabajo en subtareas, cada IA hará su parte en paralelo y se revisarán entre ellas antes de entregarte el resultado listo para revisar.</p>
         <form id="newRunForm" class="form">
           <label>
-            <span>Carpeta del proyecto (repositorio git)</span>
-            <input name="repoPath" required placeholder="C:\Users\tu-usuario\proyectos\mi-app" autocomplete="off" />
+            <span>Proyecto donde trabajarán</span>
+            <div class="path-picker-row">
+              <input name="repoPath" required placeholder="C:\Users\tu-usuario\proyectos\mi-app" autocomplete="off" />
+              <button type="button" data-pick-folder class="pick-folder-btn"><svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg> <span>Examinar…</span></button>
+            </div>
           </label>
           <label>
-            <span>Objetivo</span>
-            <textarea name="goal" rows="5" required placeholder="Ej.: Añade un sistema de login con email y contraseña, con tests y documentación."></textarea>
+            <span>¿Qué quieres que construyan o resuelvan?</span>
+            <textarea name="goal" rows="4" required placeholder="Ej.: Crea una página de contacto con validación, pruebas y estilos responsivos."></textarea>
           </label>
           <fieldset>
             <legend>IAs que participan</legend>
             <div class="agent-pick" data-agent-pick></div>
           </fieldset>
-          <label><span>Permisos de esta tarea</span><select name="autonomy" data-levels></select><span class="muted small-text level-hint" data-level-hint></span></label>
-          <div class="row">
-            <label>
-              <span>Coordinadora (divide el trabajo)</span>
-              <select name="coordinator" id="coordinatorSel"></select>
-            </label>
-            <label>
-              <span>Comando de verificación <em class="muted">(opcional)</em></span>
-              <input name="testCommand" placeholder="npm test" autocomplete="off" />
-            </label>
-          </div>
-          <label class="check"><input type="checkbox" name="review" checked /> Revisión cruzada entre IAs</label>
-          <label class="check"><input type="checkbox" name="adversarial" /> Fase adversarial: una IA intenta romper el resultado (vulnerabilidades, casos límite) y otra lo corrige</label>
-          <label class="check"><input type="checkbox" name="autoApprove" /> Empezar sin esperar a que apruebe el reparto</label>
+          <label><span>Permisos durante la tarea</span><select name="autonomy" data-levels></select><span class="muted small-text level-hint" data-level-hint></span></label>
+          <details class="advanced-box">
+            <summary>Opciones avanzadas de coordinación (opcional)</summary>
+            <div class="advanced-body">
+              <div class="row">
+                <label>
+                  <span>Coordinadora (divide el trabajo)</span>
+                  <select name="coordinator" id="coordinatorSel"></select>
+                </label>
+                <label>
+                  <span>Comando de pruebas automáticas <em class="muted">(opcional)</em></span>
+                  <input name="testCommand" placeholder="npm test" autocomplete="off" />
+                </label>
+              </div>
+              <label class="check"><input type="checkbox" name="review" checked /> Revisión cruzada entre las IAs antes de entregar</label>
+              <label class="check"><input type="checkbox" name="adversarial" /> Prueba de estrés: una IA busca fallos o casos límite y otra los corrige</label>
+              <label class="check"><input type="checkbox" name="autoApprove" checked /> Empezar directamente sin detenerse a pedir aprobación del reparto</label>
+            </div>
+          </details>
           <p id="formError" class="error" hidden></p>
-          <button class="primary" type="submit">Crear tarea de equipo</button>
+          <button class="primary" type="submit">Iniciar tarea en equipo</button>
         </form>
       </section>
     </template>
@@ -110,12 +183,14 @@
     <template id="newChatTpl">
       <section class="panel narrow">
         <h1>Nueva conversación con el equipo</h1>
-        <p class="muted">Conversa con una IA mediante su @nombre o pide respuestas de todas con <b>@equipo</b>. Usa <b>/equipo</b> para convertir un objetivo en una tarea paralela.</p>
-        <p class="muted">El trabajo ocurre en una copia aislada. Podrás revisar los cambios antes de aplicarlos a tu proyecto.</p>
+        <p class="muted">Elige tu proyecto y conversa con una IA o con todo el equipo a la vez. Trabajan en una copia segura para que revises los cambios antes de aplicarlos.</p>
         <form id="newChatForm" class="form">
           <label>
-            <span>Carpeta del proyecto (repositorio git)</span>
-            <input name="repoPath" required placeholder="C:\Users\tu-usuario\proyectos\mi-app" autocomplete="off" />
+            <span>Carpeta del proyecto</span>
+            <div class="path-picker-row">
+              <input name="repoPath" required placeholder="C:\Users\tu-usuario\proyectos\mi-app" autocomplete="off" />
+              <button type="button" data-pick-folder class="pick-folder-btn"><svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg> <span>Examinar…</span></button>
+            </div>
           </label>
           <fieldset>
             <legend>IAs en la conversación</legend>
@@ -130,75 +205,465 @@
     <dialog id="diffDlg" class="wide-dialog">
       <div class="dialog-head">
         <h2>Cambios</h2>
-        <button class="ghost" data-close>Cerrar</button>
+        <button class="ghost dlg-x" data-close title="Cerrar (Esc)" aria-label="Cerrar"><svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
       </div>
       <div id="diffBody"></div>
     </dialog>
 
-    <dialog id="settingsDlg">
-      <form id="settingsForm" method="dialog" class="form">
-        <h2>Ajustes</h2>
-        <fieldset>
-          <legend>Apariencia</legend>
-          <div class="theme-grid" id="themeGrid"></div>
-          <div class="muted small-text" style="margin:10px 0 6px">Color de acento</div>
-          <div class="accent-row" id="accentRow"></div>
-        </fieldset>
-        <fieldset>
-          <legend>Notificaciones</legend>
-          <div class="notif-row">
-            <label class="check"><input type="checkbox" id="notifEnabled" /> Avisarme cuando una IA termine, el equipo necesite mi aprobación o algo falle</label>
-            <label class="check"><input type="checkbox" id="notifSound" /> Con sonido</label>
-            <button type="button" class="small" id="notifTest">Probar</button>
-          </div>
-          <p class="muted small-text" id="notifHint"></p>
-        </fieldset>
-        <fieldset>
-          <legend>Dictado por voz</legend>
-          <div id="speechSettings"></div>
-        </fieldset>
-        <label>
-          <span>Autonomía de las IAs</span>
-          <select name="autonomy" data-levels></select>
-          <span class="muted small-text level-hint" data-level-hint></span>
-        </label>
-        <div class="row">
-          <label><span>Tiempo máximo por subtarea (min)</span><input name="taskTimeoutMinutes" type="number" min="1" max="240" /></label>
-          <label><span>Rondas de corrección tras revisión</span><input name="maxFixRounds" type="number" min="0" max="5" /></label>
-        </div>
-        <div id="agentSettings"></div>
-        <div class="shutdown-row">
+    <dialog id="settingsDlg" class="settings-dialog orca-settings-dlg">
+      <form id="settingsForm" method="dialog" class="settings-shell">
+        <div class="settings-header">
           <div>
-            <b>Servidor de AITeam</b>
-            <div class="muted small-text">Reinicia para cargar cambios en la lógica (server.js, src/). Los cambios de la interfaz solo necesitan recargar (Ctrl+R).</div>
+            <h2>Ajustes de AITeam</h2>
+            <p class="muted small-text">Capacidades de IA, flujos de trabajo, interfaz, privacidad y sistema</p>
           </div>
-          <div class="actions">
-            <button type="button" id="restartBtn">Reiniciar</button>
-            <button type="button" class="danger" id="shutdownBtn">Apagar</button>
+          <button type="button" id="closeSettingsX" class="ghost dlg-x" title="Cerrar (Esc)" aria-label="Cerrar"><svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+        </div>
+
+        <div class="settings-body">
+          <nav class="settings-nav" id="settingsNav" aria-label="Categorías de ajustes">
+            <div class="settings-nav-group">Capacidades de IA</div>
+            <button type="button" class="settings-tab active" data-settings-tab="team">
+              <svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              <span>Agentes y Cuentas</span>
+            </button>
+            <button type="button" class="settings-tab" data-settings-tab="orchestration">
+              <svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>
+              <span>Orquestación</span>
+            </button>
+            <button type="button" class="settings-tab" data-settings-tab="voice">
+              <svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+              <span>Voz</span>
+            </button>
+
+            <div class="settings-nav-group">Flujos de trabajo</div>
+            <button type="button" class="settings-tab" data-settings-tab="git">
+              <svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><path d="M6 8.5v7M18 8.5a6 6 0 0 1-6 6H6"/></svg>
+              <span>Git y Control de Versiones</span>
+            </button>
+            <button type="button" class="settings-tab" data-settings-tab="skills">
+              <svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z"/><path d="M14 2v5h5"/><path d="M9 13h6M9 17h4"/></svg>
+              <span>Skills y Comandos</span>
+            </button>
+            <button type="button" class="settings-tab" data-settings-tab="terminal">
+              <svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M12 15h5"/></svg>
+              <span>Terminal, Web y MCP</span>
+            </button>
+
+            <div class="settings-nav-group">Interfaz</div>
+            <button type="button" class="settings-tab" data-settings-tab="general">
+              <svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 0 0 0 18c1.1 0 1.5-.8 1.5-1.5 0-.9-.6-1.2-.6-2 0-.9.7-1.5 1.6-1.5H17a4 4 0 0 0 4-4c0-5-4-9-9-9z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7" r="1"/><circle cx="15" cy="7.5" r="1"/></svg>
+              <span>Apariencia</span>
+            </button>
+            <button type="button" class="settings-tab" data-settings-tab="input">
+              <svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M8 15h8"/></svg>
+              <span>Entrada y Atajos</span>
+            </button>
+            <button type="button" class="settings-tab" data-settings-tab="notifications">
+              <svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+              <span>Notificaciones</span>
+            </button>
+            <button type="button" class="settings-tab" data-settings-tab="usage">
+              <svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+              <span>Estadísticas y Uso</span>
+            </button>
+
+            <div class="settings-nav-group">Privacidad y Sistema</div>
+            <button type="button" class="settings-tab" data-settings-tab="privacy">
+              <svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              <span>Privacidad y Permisos</span>
+            </button>
+            <button type="button" class="settings-tab" data-settings-tab="system">
+              <svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+              <span>Avanzado y Servidor</span>
+            </button>
+          </nav>
+
+          <div class="settings-panes">
+            <!-- 1. Agentes y Cuentas de proveedores -->
+            <section class="settings-pane" data-settings-pane="team">
+              <div class="settings-card">
+                <div class="settings-card-head row-between">
+                  <div>
+                    <b>Catálogo de Agentes e Integraciones CLI</b>
+                    <span class="muted small-text">Activa cualquiera de las 45 herramientas CLI compatibles o añade un comando propio</span>
+                  </div>
+                  <button type="button" class="small primary" id="settingsOpenCatalogBtn">Abrir Catálogo (45 agentes)</button>
+                </div>
+                <div id="providerAccountsList" class="provider-accounts-grid"></div>
+              </div>
+
+              <div class="settings-section-intro">
+                <b>Perfiles, modelos y Computer Use / Capacidades de tu equipo</b>
+                <p class="muted small-text">Personaliza el modelo, perfil de especialidad y capacidades especiales (generación de imágenes y control de navegador / Computer Use) de cada IA activa.</p>
+              </div>
+              <div id="agentSettings" class="agent-settings-list"></div>
+            </section>
+
+            <!-- 2. Orquestación -->
+            <section class="settings-pane" data-settings-pane="orchestration" hidden>
+              <div class="settings-card">
+                <div class="settings-card-head">
+                  <b>Orquestación del equipo multi-IA</b>
+                  <span class="muted small-text">Cómo planifican, negocian, ejecutan en paralelo y revisan el trabajo</span>
+                </div>
+                <div class="row">
+                  <label class="form-label">
+                    <span>IA Coordinadora predeterminada</span>
+                    <select name="defaultCoordinator" id="settingsCoordinatorSel"></select>
+                  </label>
+                  <label class="form-label">
+                    <span>Tiempo máximo por subtarea (min)</span>
+                    <input name="taskTimeoutMinutes" type="number" min="1" max="240" />
+                  </label>
+                </div>
+                <div class="row" style="margin-top:10px">
+                  <label class="form-label">
+                    <span>Rondas máximas de corrección tras revisión</span>
+                    <input name="maxFixRounds" type="number" min="0" max="5" />
+                  </label>
+                  <div></div>
+                </div>
+                <div class="settings-checks-stack" style="margin-top:12px">
+                  <label class="check"><input type="checkbox" name="orchCrossReview" /> Activar revisión cruzada entre IAs por defecto antes de integrar</label>
+                  <label class="check"><input type="checkbox" name="orchAdversarial" /> Activar Equipo Rojo (pruebas adversariales) por defecto</label>
+                  <label class="check"><input type="checkbox" name="orchAutoApprove" /> Aprobar el reparto automáticamente sin detenerse a pedir confirmación</label>
+                </div>
+              </div>
+
+              <div class="settings-card">
+                <div class="settings-card-head">
+                  <b>Compactación automática de contexto</b>
+                  <span class="muted small-text">Resume mensajes antiguos cuando una sesión se vuelve muy larga para ahorrar cuota y mantener agilidad</span>
+                </div>
+                <label class="check" style="margin-bottom:10px">
+                  <input type="checkbox" name="compactionEnabled" /> Resumir historial automáticamente al superar el umbral
+                </label>
+                <div class="row">
+                  <label class="form-label">
+                    <span>Umbral de caracteres del contexto</span>
+                    <input name="compactionThreshold" type="number" min="10000" max="300000" step="5000" />
+                  </label>
+                  <label class="form-label">
+                    <span>Mensajes recientes a conservar íntegros</span>
+                    <input name="compactionKeepRecent" type="number" min="4" max="50" />
+                  </label>
+                </div>
+              </div>
+            </section>
+
+            <!-- 3. Voz -->
+            <section class="settings-pane" data-settings-pane="voice" hidden>
+              <div class="settings-card">
+                <div class="settings-card-head">
+                  <b>Dictado por voz (Ctrl+M)</b>
+                  <span class="muted small-text">Habla en español o inglés para escribir en el chat sin usar el teclado (Whisper local o navegador)</span>
+                </div>
+                <div id="speechSettings"></div>
+              </div>
+            </section>
+
+            <!-- 4. Git y Control de Versiones -->
+            <section class="settings-pane" data-settings-pane="git" hidden>
+              <div class="settings-card">
+                <div class="settings-card-head">
+                  <b>Git y Copias de Trabajo Aisladas (Worktrees)</b>
+                  <span class="muted small-text">AITeam protege tus archivos creando ramas y árboles de trabajo independientes por conversación o tarea</span>
+                </div>
+                <div class="settings-checks-stack">
+                  <label class="check"><input type="checkbox" name="gitAutoInit" /> Inicializar Git y crear commit inicial automáticamente al elegir carpetas sin repositorio</label>
+                  <label class="check"><input type="checkbox" name="gitAutoClean" /> Limpiar copias temporales automáticamente después de aplicar los cambios al proyecto</label>
+                </div>
+                <div class="row" style="margin-top:12px">
+                  <label class="form-label">
+                    <span>Prefijo de ramas creadas por AITeam</span>
+                    <input name="gitBranchPrefix" placeholder="aiteam/" />
+                  </label>
+                  <div></div>
+                </div>
+              </div>
+            </section>
+
+            <!-- 5. Skills, Reglas y Comandos rápidos -->
+            <section class="settings-pane" data-settings-pane="skills" hidden>
+              <div class="settings-card">
+                <div class="settings-card-head">
+                  <b>Skills y Reglas compartidas del proyecto (AGENTS.md / CLAUDE.md)</b>
+                  <span class="muted small-text">Comparte instrucciones de estilo, comandos de build y arquitectura con todas las IAs del equipo</span>
+                </div>
+                <label class="check" style="margin-bottom:10px">
+                  <input type="checkbox" name="projectRulesEnabled" /> Incluir automáticamente <code>AGENTS.md</code> y <code>CLAUDE.md</code> del proyecto en el contexto de cada IA
+                </label>
+                <div class="row">
+                  <label class="form-label">
+                    <span>Tamaño máximo de reglas inyectadas (caracteres)</span>
+                    <input name="projectRulesMaxChars" type="number" min="2000" max="100000" step="1000" />
+                  </label>
+                  <div></div>
+                </div>
+              </div>
+
+              <div class="settings-card">
+                <div class="settings-card-head row-between">
+                  <div>
+                    <b>Recetas de Equipo y Comandos Rápidos (Ctrl+K)</b>
+                    <span class="muted small-text">Flujos de trabajo preconfigurados para auditorías, refactorización y revisiones pre-PR</span>
+                  </div>
+                  <button type="button" class="small primary" id="settingsOpenCmdPaletteBtn">Abrir Paleta (Ctrl+K)</button>
+                </div>
+                <div id="settingsRecipesList" class="settings-recipes-list"></div>
+              </div>
+            </section>
+
+            <!-- 6. Terminal, Navegador y MCP -->
+            <section class="settings-pane" data-settings-pane="terminal" hidden>
+              <div class="settings-card">
+                <div class="settings-card-head row-between">
+                  <div>
+                    <b>Navegador integrado y Detector de puertos locales</b>
+                    <span class="muted small-text">Previsualiza tu servidor de desarrollo en vivo junto al chat</span>
+                  </div>
+                  <button type="button" class="small" id="settingsScanPortsBtn">Escanear puertos ahora</button>
+                </div>
+                <label class="form-label">
+                  <span>URL predeterminada de la Vista Previa</span>
+                  <input name="defaultPreviewUrl" placeholder="http://localhost:3000" />
+                </label>
+                <div id="settingsPortsStatus" class="muted small-text" style="margin-top:8px"></div>
+              </div>
+
+              <div class="settings-card">
+                <div class="settings-card-head">
+                  <b>Terminal integrada y Servidores MCP (Plugins)</b>
+                  <span class="muted small-text">Ejecuta comandos en la copia aislada o conecta herramientas externas por HTTPS</span>
+                </div>
+                <p class="muted small-text" style="margin:0 0 10px">En cualquier conversación puedes pulsar el botón <b>Herramientas</b> de la barra inferior para abrir la <b>Terminal aislada</b>, gestionar <b>Extensiones MCP</b> (para Claude y Codex) o restaurar <b>Versiones (Snapshots)</b> por turno.</p>
+              </div>
+            </section>
+
+            <!-- 7. Apariencia -->
+            <section class="settings-pane" data-settings-pane="general" hidden>
+              <div class="settings-card">
+                <div class="settings-card-head">
+                  <b>Tema visual</b>
+                  <span class="muted small-text">Se aplica al instante en toda la aplicación y en la barra de título</span>
+                </div>
+                <div class="theme-grid" id="themeGrid"></div>
+                <div class="muted small-text" style="margin:14px 0 8px">Color de acento</div>
+                <div class="accent-row" id="accentRow"></div>
+              </div>
+
+              <div class="settings-card">
+                <div class="settings-card-head">
+                  <b>Densidad de la interfaz</b>
+                  <span class="muted small-text">Ajusta el espaciado de mensajes y paneles laterales</span>
+                </div>
+                <div class="row">
+                  <label class="form-label">
+                    <span>Espaciado visual</span>
+                    <select name="uiDensity" id="uiDensitySel">
+                      <option value="comfortable">Cómodo (predeterminado)</option>
+                      <option value="compact">Compacto (más contenido en pantalla)</option>
+                    </select>
+                  </label>
+                  <div></div>
+                </div>
+              </div>
+            </section>
+
+            <!-- 8. Entrada, Edición y Atajos -->
+            <section class="settings-pane" data-settings-pane="input" hidden>
+              <div class="settings-card">
+                <div class="settings-card-head">
+                  <b>Entrada y edición del compositor</b>
+                  <span class="muted small-text">Personaliza cómo escribes, pegas capturas y envías mensajes</span>
+                </div>
+                <div class="settings-checks-stack">
+                  <label class="check"><input type="checkbox" name="sendWithEnter" /> Enviar mensaje al pulsar <code>Intro</code> (usa <code>Mayús+Intro</code> para salto de línea)</label>
+                  <label class="check"><input type="checkbox" name="spellcheck" /> Activar revisión ortográfica mientras escribes</label>
+                </div>
+              </div>
+
+              <div class="settings-card">
+                <div class="settings-card-head">
+                  <b>Atajos de teclado</b>
+                  <span class="muted small-text">Accesos rápidos disponibles en cualquier momento</span>
+                </div>
+                <div class="shortcuts-table">
+                  <div class="sc-row"><span>Abrir paleta de comandos y recetas</span><kbd>Ctrl + K</kbd></div>
+                  <div class="sc-row"><span>Iniciar / detener dictado por voz</span><kbd>Ctrl + M</kbd></div>
+                  <div class="sc-row"><span>Pegar captura de pantalla o imagen en el chat</span><kbd>Ctrl + V</kbd></div>
+                  <div class="sc-row"><span>Enviar mensaje o iniciar tarea</span><kbd>Intro</kbd></div>
+                  <div class="sc-row"><span>Insertar nueva línea en el mensaje</span><kbd>Mayús + Intro</kbd></div>
+                  <div class="sc-row"><span>Cerrar cualquier ventana modal</span><kbd>Esc</kbd></div>
+                </div>
+              </div>
+            </section>
+
+            <!-- 9. Notificaciones -->
+            <section class="settings-pane" data-settings-pane="notifications" hidden>
+              <div class="settings-card">
+                <div class="settings-card-head">
+                  <b>Notificaciones y avisos</b>
+                  <span class="muted small-text">Te avisa cuando una IA termina su turno o cuando el equipo necesita una decisión</span>
+                </div>
+                <div class="notif-row">
+                  <label class="check"><input type="checkbox" id="notifEnabled" /> Activar avisos de escritorio</label>
+                  <label class="check"><input type="checkbox" id="notifSound" /> Con sonido suave de dos tonos</label>
+                  <button type="button" class="small" id="notifTest">Probar aviso</button>
+                </div>
+                <p class="muted small-text" id="notifHint" style="margin:8px 0 0"></p>
+              </div>
+            </section>
+
+            <!-- 10. Estadísticas y Uso -->
+            <section class="settings-pane" data-settings-pane="usage" hidden>
+              <div class="settings-card">
+                <div class="settings-card-head row-between">
+                  <div>
+                    <b>Estadísticas de actividad y cuotas de IA</b>
+                    <span class="muted small-text">Consumo de ventana de 5 horas, límite semanal y actividad acumulada</span>
+                  </div>
+                  <button type="button" class="small" id="settingsRefreshUsageBtn">Actualizar cuotas</button>
+                </div>
+                <div id="settingsStatsSummary" class="settings-stats-kpi"></div>
+                <div id="settingsUsageMeters" class="settings-usage-list"></div>
+              </div>
+            </section>
+
+            <!-- 11. Privacidad y Seguridad -->
+            <section class="settings-pane" data-settings-pane="privacy" hidden>
+              <div class="settings-card">
+                <div class="settings-card-head">
+                  <b>Nivel de permisos predeterminado</b>
+                  <span class="muted small-text">Permisos iniciales al crear una nueva conversación o tarea en equipo</span>
+                </div>
+                <label class="form-label">
+                  <select name="autonomy" data-levels></select>
+                  <span class="muted small-text level-hint" data-level-hint></span>
+                </label>
+              </div>
+
+              <div class="settings-card">
+                <div class="settings-card-head">
+                  <b>Privacidad, Aislamiento y Telemetría</b>
+                  <span class="muted small-text">Tus proyectos y credenciales nunca pasan por servidores intermedios de AITeam</span>
+                </div>
+                <ul class="privacy-guarantees">
+                  <li><b>100% Local y sin telemetría:</b> AITeam se ejecuta íntegramente en tu PC (<code>127.0.0.1</code>) y no envía analíticas ni telemetría a ningún servidor externo.</li>
+                  <li><b>Protección del código original:</b> Las IAs trabajan siempre sobre una copia aislada (<code>git worktree</code>). Ningún cambio toca tu rama principal hasta que lo revisas y pulsas <b>Aplicar al proyecto</b>.</li>
+                  <li><b>Sesiones directas de cada CLI:</b> Cada agente utiliza tu propia sesión oficial del CLI correspondiente (Claude, Codex, Gemini, GitHub Copilot, etc.) sin almacenar tus claves en texto plano.</li>
+                </ul>
+              </div>
+            </section>
+
+            <!-- 12. Avanzado y Servidor -->
+            <section class="settings-pane" data-settings-pane="system" hidden>
+              <div class="settings-card">
+                <div class="settings-card-head">
+                  <b>Servidor local y almacenamiento</b>
+                  <span class="muted small-text">Diagnóstico del proceso actual, reinicio rápido y apagado</span>
+                </div>
+                <div id="settingsServerInfo" class="muted small-text mono" style="margin-bottom:12px"></div>
+                <p class="muted small-text" style="margin:0 0 12px">Los cambios visuales de la interfaz solo requieren recargar la ventana (<code>Ctrl+R</code>). Si modificaste archivos del servidor (<code>server.js</code> o <code>src/</code>), usa <b>Reiniciar servidor</b>.</p>
+                <div class="actions">
+                  <button type="button" id="restartBtn"><svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></svg> <span>Reiniciar servidor</span></button>
+                  <button type="button" class="danger" id="shutdownBtn"><svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0"/></svg> <span>Apagar AITeam</span></button>
+                </div>
+              </div>
+
+              <div class="settings-card" id="settingsRollbackCard" hidden style="border-left: 3px solid var(--accent); margin-top: 14px;">
+                <div class="settings-card-head row-between">
+                  <div>
+                    <b>Punto de restauración (Rollback en 1 clic)</b>
+                    <span class="muted small-text" id="settingsRollbackDesc">Existe una versión anterior guardada antes de la última auto-mejora.</span>
+                  </div>
+                  <button type="button" class="danger small" id="settingsRollbackBtn"><svg class="i" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg> <span>Revertir AITeam</span></button>
+                </div>
+                <div id="settingsRollbackDetails" class="muted small-text mono" style="margin-top: 6px;"></div>
+              </div>
+            </section>
           </div>
         </div>
-        <div class="dialog-actions">
-          <button value="cancel" class="ghost">Cancelar</button>
-          <button id="saveSettings" value="default" class="primary">Guardar</button>
+
+        <div class="settings-footer">
+          <span class="muted small-text">Pulsa <code>Esc</code> o el botón ✕ para salir sin guardar</span>
+          <div class="actions">
+            <button type="button" id="cancelSettingsBtn" class="ghost">Cerrar</button>
+            <button id="saveSettings" value="default" class="primary">Guardar cambios</button>
+          </div>
         </div>
       </form>
     </dialog>
 
-    <dialog id="addAgentDlg">
-      <form id="addAgentForm" class="form">
-        <h2>Añadir IA por CLI</h2>
-        <p class="muted">Conecta una herramienta instalada en este ordenador que lea el mensaje por entrada estándar y escriba su respuesta en texto por salida estándar. Inicia sesión en su CLI antes de probarla aquí.</p>
-        <div id="agentDiscovery" class="discovery-list muted small-text">Buscando herramientas instaladas…</div>
-        <label><span>Nombre visible</span><input name="name" required maxlength="48" placeholder="Mi asistente" /></label>
-        <label><span>Identificador para menciones</span><input name="id" required pattern="[a-z][a-z0-9_]{1,23}" placeholder="asistente" /></label>
-        <label><span>Comando instalado en PATH</span><input name="command" required placeholder="mi-cli" /></label>
-        <div class="actions"><button type="button" class="small" id="probeAgentCommand">Comprobar instalación</button><span id="agentProbeResult" class="muted small-text"></span></div>
-        <label><span>Argumentos fijos, uno por línea (opcional)</span><textarea name="args" rows="2" placeholder="run"></textarea></label>
-        <label><span>En qué destaca (opcional)</span><textarea name="profile" rows="2"></textarea></label>
-        <p class="muted small-text">El identificador queda fijo y se usa para @menciones. El CLI se ejecutará en la copia de trabajo del proyecto; su acceso a archivos depende de la propia herramienta.</p>
-        <p class="error" data-agent-error hidden></p>
-        <div class="dialog-actions"><button type="button" class="ghost" id="cancelAddAgent">Cancelar</button><button class="primary" type="submit">Añadir IA</button></div>
-      </form>
+    <dialog id="addAgentDlg" class="orca-agents-dlg">
+      <div class="orca-dlg-shell">
+        <div class="orca-dlg-head">
+          <div>
+            <h2>Agentes</h2>
+            <p class="muted small-text">Administre agentes de IA, establezca un valor predeterminado y personalice comandos.</p>
+          </div>
+          <button type="button" class="ghost dlg-x" id="closeAddAgentX" title="Cerrar (Esc)" aria-label="Cerrar"><svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+        </div>
+
+        <div class="orca-dlg-toolbar">
+          <div class="orca-search-box">
+            <svg class="i" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input id="orcaAgentSearch" placeholder="Buscar agente (Claude, OpenCode, Grok, Copilot, Trae, DeepSeek…)" autocomplete="off" />
+          </div>
+          <div class="orca-filter-pills" id="orcaFilterPills">
+            <button type="button" class="orca-filter active" data-orca-filter="all">Todos</button>
+            <button type="button" class="orca-filter" data-orca-filter="installed">Instalados</button>
+            <button type="button" class="orca-filter" data-orca-filter="enabled">Activados</button>
+            <button type="button" class="orca-filter" data-orca-filter="custom">+ Personalizado</button>
+          </div>
+        </div>
+
+        <div id="orcaAgentsBody" class="orca-agents-body">
+          <div id="agentDiscovery" class="orca-agents-list">Buscando agentes…</div>
+        </div>
+
+        <form id="addAgentForm" class="form orca-custom-form" hidden>
+          <div class="settings-card">
+            <div class="settings-card-head">
+              <b>Conectar un CLI propio que no esté en la lista</b>
+              <span class="muted small-text">Indica el ejecutable disponible en PATH y sus argumentos por defecto</span>
+            </div>
+            <div class="row">
+              <label><span>Nombre visible</span><input name="name" required maxlength="48" placeholder="Mi asistente" /></label>
+              <label><span>Identificador (@mención)</span><input name="id" required pattern="[a-z][a-z0-9_]{1,23}" placeholder="asistente" /></label>
+            </div>
+            <div class="row">
+              <label><span>Comando en PATH</span><input name="command" required placeholder="mi-cli" /></label>
+              <label><span>Argumentos (uno por línea)</span><textarea name="args" rows="1" placeholder="--yolo"></textarea></label>
+            </div>
+            <div class="actions">
+              <button type="button" class="small" id="probeAgentCommand">Comprobar instalación</button>
+              <span id="agentProbeResult" class="muted small-text"></span>
+            </div>
+            <label><span>En qué destaca (opcional)</span><textarea name="profile" rows="2" placeholder="Especialidad de esta IA para el reparto de tareas…"></textarea></label>
+            <p class="error" data-agent-error hidden></p>
+            <div class="actions" style="justify-content:flex-end">
+              <button type="button" class="ghost small" id="cancelAddAgent">Volver al catálogo</button>
+              <button class="primary small" type="submit">Guardar agente</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </dialog>
+
+    <dialog id="cmdPaletteDlg" class="cmd-palette-dlg">
+      <div class="cmd-palette-head">
+        <span class="cmd-palette-ico"><svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg></span>
+        <input id="cmdPaletteInput" type="search" placeholder="Escribe un comando, receta, proyecto o sesión… (Esc para cerrar)" autocomplete="off" />
+        <kbd class="cmd-esc-hint">Esc</kbd>
+      </div>
+      <div id="cmdPaletteList" class="cmd-palette-list"></div>
+      <div class="cmd-palette-foot">
+        <span><kbd>↑↓</kbd> navegar</span>
+        <span><kbd>Intro</kbd> ejecutar</span>
+        <span><kbd>Ctrl+K</kbd> abrir/cerrar</span>
+      </div>
     </dialog>
 
     <script type="module" src="app.js"></script>

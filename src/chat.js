@@ -246,6 +246,14 @@ export class ChatManager extends EventEmitter {
       const info = LEVEL_INFO[chat.autonomy];
       this.addMessage(chat, { from: 'system', kind: 'notice', text: `Permisos: ${info.label}. ${info.short}. ${info.guarantees}` });
     }
+    if (typeof patch.model === 'string') {
+      chat.model = patch.model.trim();
+      this.save(chat);
+    }
+    if (typeof patch.effort === 'string') {
+      chat.effort = patch.effort.trim();
+      this.save(chat);
+    }
     if (typeof patch.title === 'string' && patch.title.trim()) {
       chat.title = short(patch.title, 80);
       this.save(chat);
@@ -253,20 +261,43 @@ export class ChatManager extends EventEmitter {
     return chat;
   }
 
+  /** Guarda capturas e imágenes adjuntas dentro de .aiteam-uploads/ en la copia de trabajo. */
+  saveAttachments(chat, attachments) {
+    if (!Array.isArray(attachments) || !attachments.length || !chat.worktree?.path) return [];
+    const dir = path.join(chat.worktree.path, '.aiteam-uploads');
+    fs.mkdirSync(dir, { recursive: true });
+    const saved = [];
+    for (const item of attachments.slice(0, 6)) {
+      const m = String(item?.dataUrl ?? '').match(/^data:image\/([a-zA-Z0-9+.-]+);base64,(.+)$/);
+      if (!m) continue;
+      const ext = m[1].replace('jpeg', 'jpg').replace(/[^a-z0-9]/gi, '') || 'png';
+      const base = String(item?.name ?? 'captura').replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 32) || 'captura';
+      const fileName = `${base}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+      const fullPath = path.join(dir, fileName);
+      fs.writeFileSync(fullPath, Buffer.from(m[2], 'base64'));
+      saved.push(`.aiteam-uploads/${fileName}`);
+    }
+    return saved;
+  }
+
   /** Mensaje del usuario. Devuelve el mensaje guardado. */
-  post(id, text) {
+  post(id, text, options = {}) {
     const chat = this.chats.get(id);
     if (!chat) throw new Error('No existe esa conversación.');
+    if (typeof options.model === 'string') chat.model = options.model.trim();
+    if (typeof options.effort === 'string') chat.effort = options.effort.trim();
+    const attachedFiles = this.saveAttachments(chat, options.attachments);
     text = String(text ?? '').trim();
-    if (!text) throw new Error('Escribe un mensaje.');
+    if (!text && attachedFiles.length) text = 'Analiza las imágenes adjuntas.';
+    if (!text) throw new Error('Escribe un mensaje o adjunta una imagen.');
 
     // Comandos "/": /equipo, /plan, /build, /compact y los personalizados de .aiteam/commands (ver commands.js).
     const slash = resolveSlash(chat, text);
     let mode;
-    let meta;
+    let meta = attachedFiles.length ? { attachments: attachedFiles } : undefined;
     if (slash?.kind === 'team') {
       // /equipo <objetivo> lanza una tarea de equipo completa (planificar, negociar, paralelo, revisión).
-      const msg = this.addMessage(chat, { from: 'user', text });
+      const msg = this.addMessage(chat, { from: 'user', text, ...(meta ? { meta } : {}) });
       this.launchTeamTask(chat, slash.goal).catch((err) =>
         this.addMessage(chat, { from: 'system', kind: 'error', text: `No se pudo lanzar la tarea de equipo: ${err.message}` }),
       );
@@ -288,16 +319,18 @@ export class ChatManager extends EventEmitter {
       mode = slash.mode;
     }
     if (slash?.kind === 'custom') {
-      meta = { command: slash.command, input: text };
+      meta = { ...meta, command: slash.command, input: text };
       mode = slash.mode ?? undefined;
       text = slash.agent && chat.agents.includes(slash.agent) && !parseMentions(slash.text, chat.agents).length ? `@${AGENTS[slash.agent].handle} ${slash.text}` : slash.text;
     }
 
     let targets = parseMentions(text, chat.agents);
     if (!targets.length) {
-      // Sin mención: responde quien habló por última vez (o la primera IA de la conversación).
+      // Sin mención: responde quien habló por última vez (o la IA predeterminada / primera de la conversación).
+      const defId = loadConfig().defaultAgent;
       const last = [...chat.messages].reverse().find((m) => m.kind === 'message' && AGENTS[m.from]);
-      targets = [last?.from && chat.agents.includes(last.from) ? last.from : chat.agents[0]];
+      const fallback = (defId && chat.agents.includes(defId)) ? defId : chat.agents[0];
+      targets = [last?.from && chat.agents.includes(last.from) ? last.from : fallback];
     }
     if (chat.title === 'Nueva conversación') chat.title = short(text.replace(/@\w+/g, ''), 60) || chat.title;
     const msg = this.addMessage(chat, { from: 'user', text, to: targets, ...(mode || meta ? { meta: { ...meta, ...(mode && { mode }) } } : {}) });
@@ -337,15 +370,38 @@ export class ChatManager extends EventEmitter {
     if (chat.working || this.queues.get(id)?.running) throw new Error('El equipo ya está trabajando.');
     const pending = chat.pendingTurns ?? [];
     if (!pending.length) throw new Error('No hay turnos pendientes para recuperar.');
-    const q = { items: pending.map((item) => ({ ...item })), running: false, child: null };
+    chat.paused = false;
+    const q = { items: pending.map((item) => ({ ...item })), running: false, child: null, stopped: false, paused: false };
     this.queues.set(id, q);
     this.pump(chat);
+    this.emit('chat', chat);
     return { resumed: pending.length };
+  }
+
+  /** Pausa temporalmente el turno en curso conservando los turnos pendientes para reanudar. */
+  pause(id) {
+    const chat = this.chats.get(id);
+    if (!chat) throw new Error('No existe esa conversación.');
+    chat.paused = true;
+    const q = this.queues.get(id);
+    if (q) {
+      q.paused = true;
+      q.stopped = true;
+      if (q.child) {
+        q.child.cancelled = true;
+        killTree(q.child);
+      }
+    }
+    chat.working = null;
+    this.save(chat);
+    this.emit('chat', chat);
+    return chat;
   }
 
   stop(id) {
     const chat = this.chats.get(id);
     if (!chat) throw new Error('No existe esa conversación.');
+    chat.paused = false;
     const q = this.queues.get(id);
     if (q) {
       q.items = [];
@@ -355,8 +411,10 @@ export class ChatManager extends EventEmitter {
         killTree(q.child);
       }
     }
+    chat.working = null;
     // Detener es explícito: los turnos pendientes pueden reanudarse más tarde.
     this.save(chat);
+    this.emit('chat', chat);
     return chat;
   }
 
@@ -382,7 +440,7 @@ export class ChatManager extends EventEmitter {
         const item = q.items.shift();
         try {
           await (item.run ? item.run() : this.turn(chat, item, q));
-          if (item.agent) {
+          if (!q.stopped && !q.paused && !chat.paused && item.agent) {
             const index = (chat.pendingTurns ?? []).findIndex((pending) => pending.agent === item.agent && pending.request?.id === item.request?.id && pending.hop === item.hop);
             if (index >= 0) chat.pendingTurns.splice(index, 1);
             this.save(chat);
@@ -428,11 +486,14 @@ export class ChatManager extends EventEmitter {
     const isNew = !session.resume || AGENTS[agent]?.custom || Compaction.overThreshold(delta);
     const mode = chatMode(chat, modeOverride);
     const fromLabel = request.from === 'user' ? 'USUARIO' : `@${AGENTS[request.from]?.handle ?? request.from}`;
+    const attText = request.meta?.attachments?.length
+      ? `\n\n[IMÁGENES ADJUNTAS POR EL USUARIO EN EL PROYECTO: ${request.meta.attachments.join(', ')} — puedes leer o inspeccionar estos archivos de imagen directamente para responder.]`
+      : '';
     const req = {
       fromLabel,
-      text: relayedFrom
+      text: (relayedFrom
         ? `${request.text}\n\n(NOTA DEL SISTEMA: esta petición iba dirigida a @${AGENTS[relayedFrom].handle}, pero se ha quedado sin cuota. Ahora te corresponde a ti: hazla tú como si te la hubieran pedido directamente.)`
-        : request.text,
+        : request.text) + attText,
     };
 
     const activity = [];
@@ -467,6 +528,8 @@ export class ChatManager extends EventEmitter {
         repoPath: chat.repoPath,
         mode: invokeMode(mode),
         autonomy: chat.autonomy ?? loadConfig().autonomy,
+        model: chat.model || undefined,
+        effort: chat.effort || '',
         session,
         onEvent,
         onSpawn: (child) => (q.child = child),
@@ -487,6 +550,11 @@ export class ChatManager extends EventEmitter {
 
     if (!res.ok) {
       if (res.cancelled || q.stopped) {
+        if (q.paused || chat.paused) {
+          this.addMessage(chat, { from: 'system', kind: 'notice', text: `⏸ Tarea en pausa: ${AGENTS[agent].name} detuvo su turno temporalmente. Pulsa "Reanudar" para continuar.` });
+          await G.commitAll(chat.worktree.path, `[${agent}] cambios parciales (pausado)`).catch(() => {});
+          return;
+        }
         this.addMessage(chat, { from: 'system', kind: 'notice', text: `Detenido: ${AGENTS[agent].name} no terminó su respuesta.` });
         await G.commitAll(chat.worktree.path, `[${agent}] cambios parciales (detenido)`).catch(() => {});
         return;

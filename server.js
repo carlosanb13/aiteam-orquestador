@@ -1,4 +1,5 @@
 import http from 'node:http';
+import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Orchestrator } from './src/orchestrator.js';
@@ -8,7 +9,7 @@ import { busRoutes } from './src/routes-bus.js';
 import * as G from './src/git.js';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
-import { AGENTS, MOCK, addCustomAgent, checkAgent, invokeAgent } from './src/agents.js';
+import { AGENTS, MOCK, addCustomAgent, checkAgent, configureCatalogAgent, invokeAgent, syncRegisteredAgents } from './src/agents.js';
 import { discoverAgents, probeCommand } from './src/discovery.js';
 import * as Extensions from './src/extensions.js';
 import { getUsage, onUsageChange } from './src/usage.js';
@@ -23,6 +24,31 @@ const PORT = Number(process.env.PORT) || 4317;
 const HOST = '127.0.0.1';
 const APP_ROOT = path.resolve(import.meta.dirname);
 const LOG_FILE = path.join(APP_ROOT, 'data', 'servidor.log');
+const ROLLBACK_FILE = path.join(APP_ROOT, 'data', 'last-rollback.json');
+
+function getLastRollback() {
+  try {
+    if (fs.existsSync(ROLLBACK_FILE)) {
+      return JSON.parse(fs.readFileSync(ROLLBACK_FILE, 'utf8'));
+    }
+  } catch {}
+  return null;
+}
+
+function saveLastRollback(info) {
+  try {
+    fs.mkdirSync(path.dirname(ROLLBACK_FILE), { recursive: true });
+    fs.writeFileSync(ROLLBACK_FILE, JSON.stringify(info, null, 2), 'utf8');
+  } catch (e) {
+    console.error('Error guardando info de rollback:', e);
+  }
+}
+
+function clearLastRollback() {
+  try {
+    if (fs.existsSync(ROLLBACK_FILE)) fs.unlinkSync(ROLLBACK_FILE);
+  } catch {}
+}
 
 /** ¿Hay alguna IA trabajando? (reiniciar o apagar cortaría su trabajo) */
 function teamBusy() {
@@ -141,17 +167,53 @@ async function readBody(req) {
   let raw = '';
   for await (const chunk of req) {
     raw += chunk;
-    if (raw.length > 1_000_000) throw new Error('Petición demasiado grande.');
+    if (raw.length > 25_000_000) throw new Error('Petición demasiado grande.');
   }
   return raw ? JSON.parse(raw) : {};
+}
+
+const DEV_PORTS = [3000, 3001, 3002, 4000, 4173, 4200, 4321, 5000, 5173, 5174, 5500, 8000, 8080, 8081, 8888, 9000];
+async function scanLocalPorts() {
+  const checks = await Promise.all(
+    DEV_PORTS.filter((p) => p !== PORT).map(
+      (port) =>
+        new Promise((resolve) => {
+          const s = new net.Socket();
+          let open = false;
+          s.setTimeout(140);
+          s.once('connect', () => {
+            open = true;
+            s.destroy();
+            resolve({ port, url: `http://localhost:${port}` });
+          });
+          s.once('timeout', () => {
+            s.destroy();
+            resolve(null);
+          });
+          s.once('error', () => {
+            s.destroy();
+            resolve(null);
+          });
+          s.connect(port, '127.0.0.1');
+        }),
+    ),
+  );
+  return checks.filter(Boolean);
 }
 
 let agentCache = null;
 async function agentStatus(refresh = false) {
   if (!agentCache || refresh) {
+    syncRegisteredAgents();
     const cfg = loadConfig();
+    const defId = cfg.defaultAgent || 'claude';
     agentCache = await Promise.all(
-      Object.values(AGENTS).map(async (a) => ({ ...a, ...cfg.agents[a.id], ...(await checkAgent(a.id)) })),
+      Object.values(AGENTS).map(async (a) => ({
+        ...a,
+        ...cfg.agents[a.id],
+        isDefault: a.id === defId,
+        ...(await checkAgent(a.id)),
+      })),
     );
   }
   return agentCache;
@@ -161,8 +223,34 @@ const routes = [
   ...busRoutes(orchestrator, send, readBody, broadcast),
   ...snapshotRoutes(chats, send, readBody),
   ...(await import('./src/routes-terminal.js')).terminalRoutes(chats, orchestrator, send, readBody, broadcast),
-  ['GET', /^\/api\/agents$/, async (req, res, _m, url) => send(res, 200, { mock: MOCK, agents: await agentStatus(url.searchParams.has('refresh')) })],
-  ['GET', /^\/api\/agents\/discover$/, async (req, res) => send(res, 200, { candidates: await discoverAgents() })],
+  ['GET', /^\/api\/ports$/, async (_req, res) => send(res, 200, { ports: await scanLocalPorts() })],
+  ['GET', /^\/api\/agents$/, async (req, res, _m, url) => {
+    const cfg = loadConfig();
+    send(res, 200, { mock: MOCK, defaultAgent: cfg.defaultAgent || 'claude', agents: await agentStatus(url.searchParams.has('refresh')) });
+  }],
+  ['GET', /^\/api\/agents\/discover$/, async (req, res) => {
+    const cfg = loadConfig();
+    const defId = cfg.defaultAgent || 'claude';
+    const raw = await discoverAgents();
+    const candidates = raw.map((item) => {
+      const aCfg = cfg.agents?.[item.id] ?? {};
+      const enabled = item.builtin ? aCfg.enabled !== false : Boolean(aCfg.enabled);
+      return {
+        ...item,
+        enabled,
+        isDefault: item.id === defId,
+        displayCmd: aCfg.displayCmd || item.displayCmd,
+        customCommand: aCfg.command || '',
+      };
+    });
+    send(res, 200, { defaultAgent: defId, candidates });
+  }],
+  ['POST', /^\/api\/agents\/catalog$/, async (req, res) => {
+    const body = await readBody(req);
+    const out = configureCatalogAgent(body.id, body);
+    agentCache = null;
+    send(res, 200, out);
+  }],
   ['POST', /^\/api\/agents\/probe$/, async (req, res) => send(res, 200, await probeCommand((await readBody(req)).command))],
   ['POST', /^\/api\/agents$/, async (req, res) => {
     const agent = addCustomAgent(await readBody(req));
@@ -217,15 +305,30 @@ const routes = [
     'POST',
     /^\/api\/(chats|runs)\/([\w-]+)\/apply$/,
     async (req, res, m) => {
+      const body = await readBody(req).catch(() => ({}));
       const t = reviewTarget(m[1], m[2], { mustBeIdle: true });
       const label = m[1] === 'chats' ? `la conversación «${t.chat.title}»` : `la tarea «${t.run.goal.slice(0, 80)}»`;
-      const result = await Review.apply(t, `AITeam: aplica los cambios de ${label}`);
+      const result = await Review.apply(t, `AITeam: aplica los cambios de ${label}`, body);
       if (result.ok) {
         saveReview(m[1], t);
         if (t.chat) chats.noticeApplied(t.chat, result);
         // Si se aplicó al propio AITeam, hace falta reiniciar para cargar el código nuevo.
         result.selfUpdate = path.resolve(t.repoPath).toLowerCase() === APP_ROOT.toLowerCase();
+        if (result.selfUpdate && result.before) {
+          saveLastRollback({ before: result.before, timestamp: new Date().toISOString(), label });
+        }
       }
+      send(res, 200, result);
+    },
+  ],
+  [
+    'POST',
+    /^\/api\/(chats|runs)\/([\w-]+)\/commit-project$/,
+    async (req, res, m) => {
+      const body = await readBody(req).catch(() => ({}));
+      const t = reviewTarget(m[1], m[2], { mustBeIdle: true });
+      const message = body.message || 'AITeam: guardado automático del proyecto antes de aplicar cambios';
+      const result = await Review.commitProject(t, message);
       send(res, 200, result);
     },
   ],
@@ -245,15 +348,43 @@ const routes = [
     'POST',
     /^\/api\/restart$/,
     async (req, res) => {
-      const { force } = await readBody(req);
+      const { force } = await readBody(req).catch(() => ({}));
       if (teamBusy() && !force) return send(res, 409, { error: 'Hay IAs trabajando; si reinicias ahora se cortará su trabajo.', busy: true });
       restartServer();
       send(res, 200, { ok: true });
     },
   ],
+  [
+    'POST',
+    /^\/api\/app\/rollback$/,
+    async (req, res) => {
+      const info = getLastRollback();
+      if (!info?.before) return send(res, 400, { error: 'No hay ninguna auto-mejora previa para revertir.' });
+      const body = await readBody(req).catch(() => ({}));
+      if (teamBusy() && !body.force) {
+        return send(res, 409, { error: 'Hay IAs trabajando; si reviertes ahora se cortará su trabajo.', busy: true });
+      }
+      console.log(`Revertiendo AITeam al commit ${info.before}...`);
+      const reset = await G.git(APP_ROOT, ['reset', '--hard', info.before], { allowFail: true });
+      if (!reset.ok) {
+        return send(res, 500, { error: `Error al revertir: ${reset.stderr || reset.stdout}` });
+      }
+      clearLastRollback();
+      send(res, 200, { ok: true, restoredCommit: info.before });
+      console.log('Rollback completado con éxito. Reiniciando servidor...');
+      setTimeout(() => restartServer(), 300);
+    },
+  ],
   ['GET', /^\/api\/app$/, async (req, res) => {
     const head = await G.git(APP_ROOT, ['rev-parse', 'HEAD'], { allowFail: true });
-    send(res, 200, { root: APP_ROOT, pid: process.pid, startedAt: STARTED_AT, head: head.ok ? head.stdout.trim() : null });
+    const rollback = getLastRollback();
+    send(res, 200, {
+      root: APP_ROOT,
+      pid: process.pid,
+      startedAt: STARTED_AT,
+      head: head.ok ? head.stdout.trim() : null,
+      rollback: rollback ? { commit: rollback.before, timestamp: rollback.timestamp, label: rollback.label } : null,
+    });
   }],
   // ---- Dictado local (Whisper)
   ['GET', /^\/api\/speech$/, (req, res) => send(res, 200, Speech.speechStatus())],
@@ -282,7 +413,37 @@ const routes = [
     },
   ],
   ['GET', /^\/api\/projects$/, (req, res) => send(res, 200, Projects.listProjects(knownPaths()))],
-  ['POST', /^\/api\/projects$/, async (req, res) => send(res, 201, await Projects.addProject((await readBody(req)).path))],
+  [
+    'POST',
+    /^\/api\/projects$/,
+    async (req, res) => {
+      const body = await readBody(req);
+      send(res, 201, body.prepare ? await Projects.prepareProject(body.path) : await Projects.addProject(body.path));
+    },
+  ],
+  [
+    'POST',
+    /^\/api\/projects\/pick$/,
+    async (req, res) => {
+      const script = [
+        '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
+        'Add-Type -AssemblyName System.Windows.Forms',
+        '$f = New-Object System.Windows.Forms.FolderBrowserDialog',
+        '$f.Description = "Selecciona la carpeta de tu proyecto"',
+        '$f.ShowNewFolderButton = $true',
+        'if ($f.ShowDialog() -eq "OK") { Write-Output $f.SelectedPath }',
+      ].join('; ');
+      const child = spawn('powershell.exe', ['-NoProfile', '-STA', '-Command', script], { windowsHide: false });
+      let out = '';
+      child.stdout.on('data', (d) => (out += d.toString('utf8')));
+      child.on('close', async () => {
+        const picked = out.trim();
+        if (!picked) return send(res, 200, { path: null });
+        const check = await Projects.checkFolder(picked);
+        send(res, 200, { path: picked, ...check });
+      });
+    },
+  ],
   [
     'DELETE',
     /^\/api\/projects$/,
@@ -310,6 +471,27 @@ const routes = [
   ['GET', /^\/api\/fs\/file$/, (req, res, m, url) => send(res, 200, Projects.readFile(url.searchParams.get('root'), url.searchParams.get('path'), allowedRoots()))],
   ['PATCH', /^\/api\/chats\/([\w-]+)$/, async (req, res, m) => send(res, 200, chats.update(m[1], await readBody(req)))],
   ['GET', /^\/api\/permissions$/, (req, res) => send(res, 200, { levels: LEVELS.map((id) => ({ id, ...LEVEL_INFO[id] })) })],
+  [
+    'POST',
+    /^\/api\/window-theme$/,
+    async (req, res) => {
+      const { bg = '#1d1d1b', text = '#ecebe7', border = '#34332f', dark = true } = await readBody(req);
+      const toColorRef = (hex) => {
+        const h = String(hex).replace('#', '').trim();
+        if (h.length !== 6) return 0x001b1d1d;
+        const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+        return (b << 16) | (g << 8) | r;
+      };
+      const capRef = toColorRef(bg);
+      const txtRef = toColorRef(text);
+      const brdRef = toColorRef(border);
+      const darkVal = dark ? 1 : 0;
+      const appIdPath = path.join(APP_ROOT, 'launcher', 'AppId.cs').replace(/'/g, "''");
+      const ps = `Add-Type -Path '${appIdPath}'; [AITeamAppId]::ColorWindowsTitled('AITeam', ${capRef}, ${txtRef}, ${brdRef}, ${darkVal}) | Out-Null`;
+      spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', ps], { windowsHide: true }).unref();
+      send(res, 200, { ok: true });
+    },
+  ],
   ['GET', /^\/api\/config$/, (req, res) => send(res, 200, loadConfig())],
   [
     'PUT',
@@ -346,6 +528,7 @@ const routes = [
     },
   ],
   ['POST', /^\/api\/runs\/([\w-]+)\/approve$/, async (req, res, m) => send(res, 200, orchestrator.approve(m[1], (await readBody(req)).assignments))],
+  ['POST', /^\/api\/runs\/([\w-]+)\/pause$/, (req, res, m) => send(res, 200, orchestrator.pause(m[1]))],
   ['POST', /^\/api\/runs\/([\w-]+)\/cancel$/, (req, res, m) => send(res, 200, orchestrator.cancel(m[1]))],
   [
     'GET',
@@ -370,8 +553,12 @@ const routes = [
     },
   ],
   ['DELETE', /^\/api\/chats\/([\w-]+)$/, async (req, res, m) => send(res, 200, await chats.remove(m[1]))],
-  ['POST', /^\/api\/chats\/([\w-]+)\/messages$/, async (req, res, m) => send(res, 201, chats.post(m[1], (await readBody(req)).text))],
+  ['POST', /^\/api\/chats\/([\w-]+)\/messages$/, async (req, res, m) => {
+    const body = await readBody(req);
+    send(res, 201, chats.post(m[1], body.text, body));
+  }],
   ['POST', /^\/api\/chats\/([\w-]+)\/stop$/, (req, res, m) => send(res, 200, { ok: Boolean(chats.stop(m[1])) })],
+  ['POST', /^\/api\/chats\/([\w-]+)\/pause$/, (req, res, m) => send(res, 200, { ok: Boolean(chats.pause(m[1])) })],
   ['POST', /^\/api\/chats\/([\w-]+)\/resume$/, (req, res, m) => send(res, 200, chats.resume(m[1]))],
   ['GET', /^\/api\/chats\/([\w-]+)\/extensions$/, (req, res, m) => {
     const chat = chats.get(m[1]);

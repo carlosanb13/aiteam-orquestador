@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="AITeam: AI sobre la T de Team">
+  <rect width="512" height="512" rx="108" fill="#141820"/>
+  <g fill="none" stroke="#f2efe9" stroke-linecap="square" stroke-linejoin="miter">
+    <path d="M123 271 192 123c4-9 13-9 17 0l69 148" stroke-width="35"/>
+    <path d="M153 218h94" stroke-width="27"/>
+    <path d="M357 124v147" stroke-width="38"/>
+    <path d="M111 340h290" stroke-width="37"/>
+    <path d="M256 340v89" stroke-width="37"/>
+  </g>
+</svg>

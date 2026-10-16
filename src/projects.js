@@ -34,6 +34,36 @@ export function listProjects(extraPaths = []) {
   return saved.map((p) => ({ ...p, exists: fs.existsSync(p.path) }));
 }
 
+/**
+ * Estado de una carpeta para la interfaz: si se puede usar ya o qué le falta.
+ * `needs`: null (lista), 'git' (no es repositorio) o 'commit' (repositorio sin commits).
+ */
+export async function checkFolder(rawPath) {
+  const p = String(rawPath ?? '').trim();
+  if (!p || !fs.existsSync(p) || !fs.statSync(p).isDirectory()) return { exists: false, needs: null };
+  const top = await G.git(p, ['rev-parse', '--show-toplevel'], { allowFail: true });
+  if (!top.ok) return { exists: true, needs: 'git' };
+  const head = await G.git(p, ['rev-parse', 'HEAD'], { allowFail: true });
+  return { exists: true, needs: head.ok ? null : 'commit', root: path.resolve(top.stdout.trim()) };
+}
+
+/**
+ * Deja una carpeta lista para AITeam sin que el usuario tenga que saber git:
+ * crea el repositorio si falta y hace un primer commit con lo que haya.
+ */
+export async function prepareProject(rawPath) {
+  const p = String(rawPath ?? '').trim();
+  const state = await checkFolder(p);
+  if (!state.exists) throw new Error('La carpeta no existe.');
+  if (state.needs === 'git') await G.git(p, ['init']);
+  if (state.needs) {
+    const env = { GIT_AUTHOR_NAME: 'AITeam', GIT_AUTHOR_EMAIL: 'aiteam@localhost', GIT_COMMITTER_NAME: 'AITeam', GIT_COMMITTER_EMAIL: 'aiteam@localhost' };
+    await G.git(p, ['add', '-A']);
+    await G.gitWithEnv(p, ['commit', '--allow-empty', '-m', 'Punto de partida (creado por AITeam)'], env);
+  }
+  return addProject(p);
+}
+
 export async function addProject(rawPath) {
   const info = await G.inspectRepo(String(rawPath ?? '').trim());
   const list = load();
