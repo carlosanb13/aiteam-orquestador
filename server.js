@@ -15,6 +15,7 @@ import * as Extensions from './src/extensions.js';
 import { getUsage, onUsageChange } from './src/usage.js';
 import * as Projects from './src/projects.js';
 import * as Review from './src/review.js';
+import { runReviewTarget, saveRunReview } from './src/run-review.js';
 import { LEVEL_INFO, LEVELS } from './src/permissions.js';
 import * as Speech from './src/speech.js';
 import { watchForNotifications } from './src/notify.js';
@@ -118,14 +119,12 @@ function reviewTarget(kind, id, { mustBeIdle = false } = {}) {
   const run = orchestrator.get(id);
   if (!run) throw new Error('No existe esa tarea.');
   if (run.status !== 'done' || !run.integration?.branch) throw new Error('La tarea todavía no tiene un resultado integrado.');
-  run.review ??= {};
-  return { repoPath: run.repoPath, branch: run.integration.branch, worktree: run.integration.worktree, review: run.review, run };
+  return runReviewTarget(run);
 }
 
 function saveReview(kind, t) {
   if (kind === 'chats') return chats.saveReview(t);
-  t.run.review = t.review;
-  orchestrator.touch(t.run);
+  saveRunReview(t, (run) => orchestrator.touch(run));
 }
 
 function knownPaths() {
