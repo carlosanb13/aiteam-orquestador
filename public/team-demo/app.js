@@ -39,13 +39,17 @@
     return item;
   }
 
-  function render() {
-    list.replaceChildren(...tasks.map(createTaskItem));
+  function updateStatus() {
     const completed = tasks.filter((task) => task.done).length;
     count.textContent = tasks.length === 0
       ? 'Sin tareas'
       : `${completed} de ${tasks.length} completadas`;
     empty.hidden = tasks.length > 0;
+  }
+
+  function render() {
+    list.replaceChildren(...tasks.map(createTaskItem));
+    updateStatus();
   }
 
   form.addEventListener('submit', (event) => {
@@ -70,7 +74,8 @@
     if (!task) return;
 
     task.done = toggle.checked;
-    render();
+    item.classList.toggle('is-done', task.done);
+    updateStatus();
   });
 
   render();
