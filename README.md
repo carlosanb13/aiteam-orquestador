@@ -12,7 +12,7 @@ Los conectores personalizados reciben el contexto completo en cada turno y no re
 
 ### Mejorar AITeam desde AITeam
 
-El botón **Mejorar AITeam** abre o retoma un chat del equipo sobre el repositorio de la propia aplicación. Puedes pedir cambios, dejar que las IAs se revisen y usar **Ver cambios** antes de **Aplicar al proyecto**. El chat se crea desde el último commit, así que guarda en git los cambios locales que quieras incluir antes de abrir uno nuevo. Tras aplicar cambios del servidor, reinicia AITeam desde Ajustes.
+El botón **Mejorar AITeam** abre o retoma un chat del equipo sobre el repositorio de la propia aplicación. Puedes pedir cambios y ver la respuesta en el mismo chat; AITeam incorpora automáticamente los archivos cuando puede hacerlo sin conflictos. El chat se crea desde el último commit, así que guarda en git los cambios locales que quieras incluir antes de abrir uno nuevo. Tras aplicar cambios del servidor, reinicia AITeam desde Ajustes.
 
 ## Qué puedes hacer
 
@@ -23,13 +23,13 @@ Un chat único donde hablas con todas a la vez:
 - **Se llaman entre sí como compañeras**: si una IA escribe `@codex: revisa la función X`, Codex recibe la petición y contesta en el mismo chat. Tras 4 intercambios seguidos entre ellas, AITeam pausa para que decidas.
 - **Contexto compartido**: todas ven la conversación. Además, cada IA reanuda su propia sesión del CLI, así que recuerda lo que hizo en turnos anteriores.
 - **Relevo automático**: si una se queda sin cuota, otra atiende la misma petición.
-- Trabajan sobre una **copia aislada** del proyecto (una rama git propia de la conversación). Con **Ver cambios** revisas el diff y, si te convence, lo fusionas.
+- Trabajan sobre una **copia aislada** del proyecto (una rama git propia de la conversación). Al terminar, AITeam incorpora el resultado al proyecto si la verificación pasa y el proyecto no tiene cambios pendientes.
 - `/equipo <objetivo>` lanza una tarea de equipo completa a partir de lo hecho en la conversación.
 - **Tres niveles de permisos** por conversación y por tarea (ver [Permisos](#permisos)): *Protegido*, *Comandos en el proyecto* y *Control total*.
 
-### ✅ Revisar y aplicar
-- **Revisar cambios** muestra cada archivo que tocaron las IAs con su diff (e imágenes). Puedes **Aceptar**, **Rechazar** (deshace ese archivo en la copia) o **Pedir cambios** a una IA concreta sobre ese archivo.
-- **Aplicar al proyecto** fusiona el trabajo en la rama actual de tu proyecto. No toca nada si tienes cambios sin guardar; si hay conflictos, deshace la fusión y una IA puede resolverlos (**Traer cambios del proyecto**).
+### ✅ Entrega y cambios
+- Al terminar, AITeam muestra la respuesta completa y un resumen del trabajo en el mismo chat o en la tarea. Si hay archivos nuevos o modificados, intenta incorporarlos automáticamente al proyecto; puedes abrir los archivos y ver la lista de cambios desde ese resultado.
+- Si hay cambios locales sin guardar, conflictos, errores de sintaxis o falla la verificación del equipo, conserva la copia y explica qué quedó pendiente. **Revisar cambios** permite entonces examinar el diff, pedir ajustes o aplicar después. Al mejorar el propio AITeam, reinicia la app desde Ajustes para cargar el código nuevo.
 
 ### 🎙️ Dictado por voz
 Botón de micrófono (o **Ctrl+M**) en el chat, en el formulario de tareas y al pedir cambios. Dos motores (Ajustes → Dictado por voz):
@@ -65,7 +65,7 @@ En la barra lateral ves cuánto te queda de cada una:
 ### 📁 Proyectos y archivos
 Barra lateral por proyectos con sus conversaciones y tareas, y un explorador de archivos con visor (del proyecto, de la copia de una conversación o del resultado integrado de una tarea).
 
-Tu rama principal nunca se toca: tú decides qué fusionas.
+La copia de trabajo conserva el historial de cada agente. Los cambios terminados se integran en la rama actual del proyecto; si no se pueden integrar, permanecen en la copia para resolverlos.
 
 ## Utilidades inspiradas en Orca y OpenCode
 
@@ -132,15 +132,15 @@ npm run mock       # modo simulación: no llama a ninguna IA, para probar la int
 2. Abre una conversación (💬+) o una tarea de equipo (⚡+) desde el proyecto.
 3. **Probar** en el panel de equipo comprueba que cada IA responde con tu sesión.
 
-> Puedes usar AITeam para mejorar AITeam: añade esta misma carpeta como proyecto. Las IAs trabajan en una copia aparte, así que la app sigue funcionando; cuando te guste el resultado, fusiona la rama y reinicia.
+> Puedes usar AITeam para mejorar AITeam: añade esta misma carpeta como proyecto. Las IAs trabajan en una copia aparte; al terminar, revisa su respuesta y reinicia la app si aplicaron cambios al servidor.
 
 ## Primera prueba real
 
 1. En **Equipo y uso**, pulsa **Probar** para comprobar que la IA elegida responde con tu sesión iniciada.
 2. Añade un repositorio git como proyecto y crea un chat nuevo desde ese proyecto.
 3. Pide un cambio pequeño y concreto, por ejemplo: «Añade una línea al README que explique para qué sirve este proyecto».
-4. Abre **Revisar cambios** y examina el diff del archivo. Si hace falta, usa **Pedir cambios** antes de aceptarlo.
-5. Cuando el resultado te convenza, pulsa **Aplicar al proyecto** y comprueba el cambio en tu repositorio.
+4. Lee la respuesta en el chat y abre **Ver cambios** o **Ver archivos** para examinar el resultado.
+5. Comprueba el cambio en tu repositorio. Si AITeam informó de cambios pendientes, abre **Resolver cambios pendientes**.
 6. Si el cambio afecta al servidor de AITeam, reinícialo desde **Ajustes** para probar la versión aplicada.
 
 ## Permisos
