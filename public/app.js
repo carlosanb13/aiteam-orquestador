@@ -1676,13 +1676,13 @@ function showWelcome(initialProject) {
         <div class="welcome-hero">
           <img src="icon-192.png" width="46" height="46" alt="" class="welcome-logo" />
           <h1>¿En qué trabajamos hoy?</h1>
-          <p class="muted">Tus IAs colaboran sobre una copia segura de tu proyecto. Revisa antes de aplicar.</p>
+          <p class="muted">Pide un resultado: AITeam coordina a tus IAs y te responde aquí mismo.</p>
         </div>
 
         <div class="welcome-steps">
           <div class="w-step"><span class="w-num">1</span><div><b>Elige tu carpeta</b><small>En el selector o con Examinar</small></div></div>
           <div class="w-step"><span class="w-num">2</span><div><b>Pide o encarga</b><small>Al equipo, a una IA o en paralelo</small></div></div>
-          <div class="w-step"><span class="w-num">3</span><div><b>Revisa y aplica</b><small>Tu proyecto original no se toca sin permiso</small></div></div>
+          <div class="w-step"><span class="w-num">3</span><div><b>Recibe el resultado</b><small>Verás la respuesta y los archivos entregados aquí</small></div></div>
         </div>
 
         <div class="quick-prompts">
@@ -2176,7 +2176,7 @@ function renderChatHead() {
       <button id="chatPreview" class="ghost small" title="Vista previa web en vivo y servidores locales">${icon('globe', 15)} Vista previa</button>
       <button id="chatFiles" class="ghost small" title="Explorar los archivos de esta copia">${icon('folder', 15)} Archivos</button>
       <button id="chatTools" class="ghost small" title="Terminal, comandos y versiones">${icon('terminal', 15)} Herramientas</button>
-      <button id="chatDiff" class="primary small">${icon('fileDiff', 15)} Revisar y aplicar cambios</button>
+      <button id="chatDiff" class="ghost small" title="Abrir los cambios que hayan quedado pendientes">${icon('fileDiff', 15)} Cambios pendientes</button>
       <details class="chat-more">
         <summary aria-label="Más opciones" title="Más opciones">⋯</summary>
         <div class="chat-more-menu">
@@ -4178,9 +4178,9 @@ function openHelpModal() {
           <p class="muted">En la barra sobre el cuadro de texto eliges si responde una IA concreta, si opinan todas (<b>Todo el equipo</b>) o si se dividen subtareas en paralelo (<b>Tarea en paralelo</b>).</p>
         </div>
         <div class="help-card">
-          <span class="help-badge">3 · Revisa antes de aplicar</span>
-          <h3>Tu proyecto original está protegido</h3>
-          <p class="muted">Las IAs editan en una copia aislada. Pulsa <b>Revisar y aplicar cambios</b> para ver qué archivos tocaron, aceptar los que te gusten y pasarlos a tu carpeta real.</p>
+          <span class="help-badge">3 · Recibe el resultado</span>
+          <h3>Respuesta y archivos en la conversación</h3>
+          <p class="muted">Las IAs trabajan en una copia aislada. Al terminar, AITeam incorpora los cambios cuando puede hacerlo con seguridad y te muestra qué hizo. Si queda algo pendiente, puedes resolverlo desde el resultado.</p>
         </div>
         <div class="help-card">
           <span class="help-badge">4 · Permisos claros</span>
@@ -4414,7 +4414,7 @@ function buildCmdPaletteItems() {
     items.push(
       {
         group: 'Conversación actual',
-        title: 'Revisar y aplicar cambios al proyecto',
+        title: 'Resolver cambios pendientes del proyecto',
         subtitle: state.chat.title,
         ico: 'fileDiff',
         badge: 'Diff',
