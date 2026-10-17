@@ -662,7 +662,7 @@ function renderRun() {
   `;
 
   for (const section of document.querySelectorAll('#main details.run-details')) {
-    section.open = openSections.has(section.dataset.section) || (section.dataset.section === 'plan' && !state.runPlanSeen?.has(run.id));
+    section.open = openSections.has(section.dataset.section) || (awaiting && section.dataset.section === 'plan' && !state.runPlanSeen?.has(run.id));
   }
   (state.runPlanSeen ??= new Set()).add(run.id);
 
@@ -696,7 +696,9 @@ function renderRun() {
     catch (err) { alert(err.message); }
   });
   $('#runFiles')?.addEventListener('click', () =>
-    run.integration?.worktree && !run.cleaned
+    run.delivery?.status === 'applied'
+      ? openFiles(run.repoPath, 'archivos del proyecto')
+      : run.integration?.worktree && !run.cleaned
       ? openFiles(run.integration.worktree, 'resultado integrado')
       : openFiles(run.repoPath, 'proyecto original'),
   );
