@@ -54,18 +54,36 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-.team-demo {
+.team-demo,
+header,
+footer {
   max-width: 40rem;
   margin: 0 auto;
-  padding: 1.5rem 1rem;
+  padding-inline: 1rem;
+}
+
+.team-demo {
+  padding-block: 1.5rem;
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
 }
 
+.task-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.task-panel h2 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
 header {
   border-bottom: 1px solid var(--border-color);
-  padding-bottom: 1rem;
+  padding-block: 1.5rem 1rem;
 }
 
 h1 {
@@ -86,6 +104,12 @@ header p {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.task-form label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-main);
 }
 
 .task-input {
@@ -220,8 +244,14 @@ footer {
 }
 
 @media (min-width: 640px) {
+  .team-demo,
+  header,
+  footer {
+    padding-inline: 1.5rem;
+  }
+
   .team-demo {
-    padding: 2.5rem 1.5rem;
+    padding-block: 2rem;
   }
 
   h1 {
@@ -230,7 +260,12 @@ footer {
 
   .task-form {
     flex-direction: row;
+    flex-wrap: wrap;
     align-items: stretch;
+  }
+
+  .task-form label {
+    flex-basis: 100%;
   }
 
   .task-add {
