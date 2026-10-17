@@ -10,6 +10,7 @@ import { normalizeLevel } from './permissions.js';
 import { DATA_DIR, loadConfig } from './config.js';
 import { killTree, runShell } from './runner.js';
 import { Bus } from './bus.js';
+import { deliverChanges } from './delivery.js';
 
 const RUNS_DIR = path.join(DATA_DIR, 'runs');
 const ACTIVE = new Set(['planning', 'bidding', 'running', 'reviewing', 'integrating', 'attacking', 'testing']);
@@ -310,6 +311,7 @@ export class Orchestrator extends EventEmitter {
       repoPath: info.root,
       baseCommit: info.baseCommit,
       baseBranch: info.baseBranch,
+      sourceWorktree: input.sourceWorktree || null,
       dirty: info.dirty,
       agents,
       activeAgents: [],
@@ -832,7 +834,23 @@ export class Orchestrator extends EventEmitter {
     if (run.testCommand) await this.verify(run, this.fallbackAgent(run, run.coordinator));
 
     const ok = !integration.unmerged.length && integration.tests?.passed !== false;
-    this.setStatus(run, 'done', ok ? 'Terminado: el resultado está listo para revisar' : 'Terminado con avisos: revisa los detalles');
+    run.delivery = ok
+      ? await deliverChanges(
+          { repoPath: run.repoPath, branch: integration.branch, worktree: integration.worktree, review: run.reviewFiles ?? {} },
+          `AITeam: entrega la tarea «${short(run.goal, 80)}»`,
+        )
+      : { status: 'pending', reason: integration.unmerged.length ? 'No se integró el trabajo de todo el equipo.' : 'La verificación falló.' };
+    if (ok && run.sourceWorktree && fs.existsSync(run.sourceWorktree)) {
+      const synced = await G.merge(run.sourceWorktree, integration.branch, 'AITeam: trae el resultado del equipo a la conversación');
+      if (!synced.ok) {
+        await G.abortMerge(run.sourceWorktree);
+        run.delivery.chatSync = 'pending';
+        run.delivery.chatSyncReason = 'El resultado se entregó, pero la conversación cambió mientras trabajaba el equipo.';
+      } else run.delivery.chatSync = 'applied';
+    }
+    this.setStatus(run, 'done', run.delivery.status === 'applied'
+      ? 'Terminado: cambios aplicados al proyecto'
+      : run.delivery.status === 'no_changes' ? 'Terminado: respuesta lista' : 'Terminado: hay cambios pendientes de integrar');
   }
 
   /** Equipo rojo: una IA intenta romper el resultado integrado y otra corrige lo que encuentre. */

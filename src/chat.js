@@ -12,6 +12,7 @@ import { LEVEL_INFO, LEVELS, levelPromptText } from './permissions.js';
 import { projectRules } from './prompts.js';
 import { chatMode, invokeMode, modeText, resolveSlash, setChatMode } from './commands.js';
 import * as Compaction from './compaction.js';
+import { deliverChanges } from './delivery.js';
 
 const CHATS_DIR = path.join(DATA_DIR, 'chats');
 const MAX_HOPS = 4;
@@ -599,12 +600,17 @@ export class ChatManager extends EventEmitter {
       files = names.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
     }
 
+    const delivery = changed && !q.stopped && !chat.paused
+      ? await deliverChanges(this.reviewTarget(chat.id), `AITeam: entrega la respuesta de ${AGENTS[agent].name}`)
+      : null;
+    if (delivery) this.save(chat);
+
     const delegations = parseDelegations(res.text, chat.agents, agent);
     const reply = this.addMessage(chat, {
       from: agent,
       to: delegations.map((d) => d.to),
       text: res.text.trim() || '(sin texto)',
-      meta: { activity, changed, stat, files, durationMs: res.durationMs, replyTo: request.id, sessionReset: res.sessionReset ?? false },
+      meta: { activity, changed, stat, files, delivery, durationMs: res.durationMs, replyTo: request.id, sessionReset: res.sessionReset ?? false },
     });
     chat.sessions[agent].seen = chat.messages.length;
 

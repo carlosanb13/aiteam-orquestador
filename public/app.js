@@ -517,7 +517,7 @@ function renderRun() {
   const guidance = awaiting
     ? 'Revisa el reparto, cambia responsables si hace falta y aprueba para que el equipo empiece.'
     : run.status === 'done'
-      ? run.integration ? 'El trabajo terminó. Revisa los cambios integrados antes de aplicarlos a tu proyecto.' : 'El trabajo terminó. Revisa el plan y la actividad para conocer el resultado.'
+      ? run.integration ? (run.delivery?.status === 'applied' ? 'El equipo terminó y los cambios ya están en tu proyecto.' : 'El equipo terminó. Los detalles indican si quedó algo pendiente.') : 'El equipo terminó. Aquí tienes el resultado.'
       : ['failed', 'cancelled', 'interrupted'].includes(run.status)
         ? 'El trabajo se detuvo. Revisa el error y la actividad para decidir el siguiente paso.'
         : 'El equipo está trabajando. Puedes seguir el plan y la actividad aquí; recibirás el resultado para revisarlo.';
@@ -599,13 +599,17 @@ function renderRun() {
     : '';
 
   const integ = run.integration;
-  const applied = Boolean(state.runChanges.get(run.id)?.applied);
+  const applied = Boolean(run.delivery?.status === 'applied' || state.runChanges.get(run.id)?.applied);
   const result =
     run.status === 'done' && integ
       ? `<section class="panel">
-        <h3>${applied ? 'Cambios aplicados al proyecto' : 'Resultado listo para revisar'}</h3>
-        <p>${applied ? 'El equipo terminó y los cambios ya están en tu proyecto.' : 'El equipo terminó e integró sus cambios. Revísalos para aplicarlos a tu proyecto.'}</p>
-        ${applied ? '' : '<button class="primary" id="runDiff">Ver resultado y aplicar</button>'}
+        <h3>${applied ? 'Cambios aplicados al proyecto' : 'Resultado del equipo'}</h3>
+        <p>${applied ? 'El equipo terminó y los cambios ya están en tu proyecto.' : esc(run.delivery?.reason ?? 'El equipo terminó; los cambios siguen en su copia de trabajo.')}</p>
+        ${run.delivery?.selfUpdate ? '<p class="muted">Reinicia AITeam desde Ajustes para cargar el código nuevo.</p>' : ''}
+        ${run.delivery?.chatSync === 'pending' ? `<p class="error">${esc(run.delivery.chatSyncReason)}</p>` : ''}
+        ${applied ? '<button id="runProjectFiles">Ver archivos del proyecto</button>' : '<button class="primary" id="runDiff">Resolver cambios pendientes</button>'}
+        ${run.tasks?.some((t) => t.summary) ? `<h4>Qué hizo el equipo</h4><ul>${run.tasks.filter((t) => t.summary).map((t) => `<li><b>${esc(t.title)}</b>: ${esc(t.summary)}</li>`).join('')}</ul>` : ''}
+        ${(run.delivery?.changes ?? []).length ? `<details><summary>Ver cambios</summary><ul>${run.delivery.changes.map((f) => `<li><code>${esc(f.file)}</code> · +${f.add} / -${f.del}</li>`).join('')}</ul></details>` : ''}
         <p class="muted">Integrado: ${integ.merged.map((a) => esc(agentInfo(a).name)).join(', ') || 'nada'}${
           integ.unmerged.length ? ` · <span class="error">Sin integrar (conflictos): ${integ.unmerged.map((a) => esc(agentInfo(a).name)).join(', ')}</span>` : ''
         }</p>
@@ -677,6 +681,7 @@ function renderRun() {
     }
   });
   $('#runDiff')?.addEventListener('click', () => openReview('runs', run.id));
+  $('#runProjectFiles')?.addEventListener('click', () => openFiles(run.repoPath, 'archivos del proyecto'));
   $('#retryRun')?.addEventListener('click', () => retryTeamRun(run));
   $('#resumeRun')?.addEventListener('click', async () => {
     try { await api('POST', `/api/runs/${run.id}/resume`); await openRun(run.id); }
@@ -2221,9 +2226,13 @@ function messageHtml(m) {
   const meta = m.meta ?? {};
   const images = meta.changed ? messageFiles(meta).filter(isImage) : [];
   const response = String(m.text ?? '').trim();
-  const concise = response.replace(/\s+/g, ' ').slice(0, 320);
-  const expanded = response.length > 420;
   const fileCount = meta.files?.length ?? (meta.changed ? messageFiles(meta).length : 0);
+  const delivery = meta.delivery;
+  const deliveryText = delivery?.status === 'applied'
+    ? `Cambios aplicados al proyecto · ${delivery.files} archivo(s)${delivery.selfUpdate ? ' · Reinicia AITeam para cargar el código nuevo' : ''}`
+    : delivery?.status === 'pending'
+      ? `Cambios pendientes: ${delivery.reason}`
+      : fileCount ? `${fileCount} archivo(s) modificados` : '';
   const extras = [
     images.length
       ? `<div class="thumbs">${images
@@ -2233,18 +2242,17 @@ function messageHtml(m) {
           })
           .join('')}</div>`
       : '',
-    meta.changed ? `<details><summary>${icon('file', 13)} ${fileCount || ''} archivo(s) tocados en este turno</summary><pre class="output">${esc(meta.stat)}</pre></details>` : '',
+    meta.changed ? `<details><summary>${icon('file', 13)} Ver cambios (${fileCount || 0} archivos)</summary><pre class="output">${esc(meta.stat)}</pre></details>` : '',
     meta.activity?.length ? `<details><summary>Pasos realizados (${meta.activity.length})</summary><div class="activity">${meta.activity.map((l) => `<div>${iconizeLine(l, esc)}</div>`).join('')}</div></details>` : '',
   ].join('');
   return `<div class="bubble-row agent">
     <div class="avatar">${emblem(m.from, 32)}</div>
     <div class="bubble" style="border-left-color:${a.color}">
       <div class="who"><b style="color:${a.color}">${esc(a.name)}</b>${to} <span class="when">${fmtTime(m.ts)}${meta.durationMs ? ` · ${Math.round(meta.durationMs / 1000)}s` : ''}</span></div>
-      ${fileCount ? `<div class="reply-result"><span>${icon('check', 12)} ${fileCount} archivo(s) modificados</span></div>` : ''}
-      <div class="text">${expanded ? esc(concise) + '…' : md(response)}</div>
-      ${expanded ? `<details class="reply-full"><summary>Mostrar respuesta completa</summary><div class="text">${md(response)}</div></details>` : ''}
+      ${deliveryText ? `<div class="reply-result"><span>${icon(delivery?.status === 'pending' ? 'alert' : 'check', 12)} ${esc(deliveryText)}</span></div>` : ''}
+      <div class="text">${md(response)}</div>
       ${extras}
-      <div class="reply-actions">${meta.changed ? `<button class="small primary" data-chat-review="${esc(state.chat.id)}">Revisar y aplicar cambios</button>` : ''}<button class="small ghost" data-chat-adjust="${esc(m.id)}" data-adjust-agent="${esc(m.from)}">Pedir ajustes</button></div>
+      <div class="reply-actions">${meta.changed ? `<button class="small" data-chat-files="${esc(state.chat.id)}" data-delivered="${delivery?.status === 'applied' ? 'true' : 'false'}">Ver archivos</button>${delivery?.status === 'pending' ? `<button class="small primary" data-chat-review="${esc(state.chat.id)}">Resolver cambios pendientes</button>` : ''}` : ''}<button class="small ghost" data-chat-adjust="${esc(m.id)}" data-adjust-agent="${esc(m.from)}">Pedir ajustes</button></div>
     </div>
   </div>`;
 }
@@ -2272,14 +2280,14 @@ function runCardHtml(run) {
   const waiting = run.status === 'awaiting_approval';
   const isDone = run.status === 'done';
   const ready = isDone && Boolean(run.integration);
-  const applied = ready && state.runChanges.get(run.id)?.applied;
+  const applied = ready && (run.delivery?.status === 'applied' || state.runChanges.get(run.id)?.applied);
   const isPaused = run.status === 'paused';
   const isActive = ['planning', 'bidding', 'running', 'reviewing', 'integrating', 'attacking', 'testing'].includes(run.status);
   const failed = ['interrupted', 'failed', 'cancelled'].includes(run.status);
   const lead = applied
     ? 'Cambios aplicados al proyecto'
     : ready
-      ? 'Resultado listo para revisar'
+      ? 'Resultado terminado con cambios pendientes'
       : isDone
         ? 'Análisis de equipo completado'
         : waiting
@@ -2292,7 +2300,7 @@ function runCardHtml(run) {
   const explain = ready
     ? applied
       ? `Se completaron ${done} de ${total} subtareas y los cambios ya están en tu proyecto.`
-      : `Se completaron ${done} de ${total} subtareas. Revisa los archivos modificados antes de aplicarlos a tu proyecto.`
+      : `Se completaron ${done} de ${total} subtareas. ${run.delivery?.reason ?? 'Los cambios siguen en la copia de trabajo.'}`
     : isDone
       ? total
         ? `Se completaron ${done} de ${total} subtareas sin modificar archivos del proyecto.`
@@ -2308,24 +2316,28 @@ function runCardHtml(run) {
               : (run.phase ?? 'Organizando el reparto entre las IAs…');
   const summaries = isDone ? run.tasks?.filter((t) => t.status === 'done' && t.summary).map((t) => `<li><b>${esc(t.title)}</b>: ${esc(t.summary)}</li>`).join('') : '';
   const delivered = isDone ? run.tasks?.filter((t) => t.status === 'done' && t.summary).map((t) => t.title) ?? [] : [];
-  const files = state.runChanges.get(run.id)?.files ?? [];
+  const files = run.delivery?.changes ?? state.runChanges.get(run.id)?.files ?? [];
   const previewFiles = files.filter((f) => f.status !== 'D' && isImage(f.file))
     .sort((a, b) => Number(/candidatos?\//i.test(a.file)) - Number(/candidatos?\//i.test(b.file)))
     .slice(0, 3);
   return `<div class="run-card-top"><span class="run-card-kicker">${icon('bolt', 13)} TAREA EN EQUIPO</span>${badge(STATUS[run.status] ?? [run.status, ''])}</div>
     <h3>${esc(lead)}</h3><p>${esc(explain)}</p>
     ${delivered.length ? `<p class="run-deliveries"><b>Entregas:</b> ${esc(delivered.slice(0, 3).join(' · '))}${delivered.length > 3 ? ` · y ${delivered.length - 3} más` : ''}</p>` : ''}
-    ${ready && files.length ? `<p class="muted small-text">${files.length} archivo(s) listos para revisar</p>` : ''}
+    ${run.delivery?.selfUpdate ? '<p class="muted small-text">Reinicia AITeam desde Ajustes para cargar el código nuevo.</p>' : ''}
+    ${run.delivery?.chatSync === 'pending' ? `<p class="error">${esc(run.delivery.chatSyncReason)}</p>` : ''}
+    ${ready && files.length ? `<p class="muted small-text">${files.length} archivo(s) ${applied ? 'entregados' : 'pendientes'}</p>` : ''}
     ${previewFiles.length && run.integration?.worktree ? `<div class="run-previews">${previewFiles.map((f) => `<img src="${imgUrl(run.integration.worktree, f.file, run.id)}" alt="${esc(f.file)}" loading="lazy" data-zoom="${imgUrl(run.integration.worktree, f.file, run.id)}" data-name="${esc(f.file)}" />`).join('')}</div>` : ''}
-    ${summaries ? `<details><summary>Resumen por subtarea</summary><ul>${summaries}</ul></details>` : ''}
+    ${summaries ? `<div class="run-delivery-summary"><b>Qué hizo el equipo</b><ul>${summaries}</ul></div>` : ''}
+    ${ready && files.length ? `<details><summary>Ver cambios</summary><ul>${files.map((f) => `<li><code>${esc(f.file)}</code> · +${f.add} / -${f.del}</li>`).join('')}</ul></details>` : ''}
     ${teamConversationHtml(run, 6)}
     <div class="actions">
       ${isActive ? `<button class="small warn" data-run-pause="${esc(run.id)}" title="Pausar la tarea temporalmente">${icon('pause', 13)} Pausar</button><button class="small danger" data-run-cancel="${esc(run.id)}" title="Cancelar la tarea">${icon('stop', 13)} Cancelar</button>` : ''}
-      ${ready && !applied ? `<button class="primary small" data-run-review="${esc(run.id)}">Revisar y aplicar cambios</button>` : ''}
+      ${ready && !applied ? `<button class="primary small" data-run-review="${esc(run.id)}">Resolver cambios pendientes</button>` : ''}
+      ${ready && applied ? `<button class="small" data-run-files="${esc(run.id)}">Ver archivos</button>` : ''}
       ${waiting ? `<button class="primary small" data-open-run="${esc(run.id)}">Aprobar reparto</button>` : ''}
       ${(run.status === 'paused' || run.status === 'interrupted') && !run.cleaned ? `<button class="small primary" data-run-resume="${esc(run.id)}" title="Reanudar tarea">${icon('play', 13)} Reanudar trabajo</button>` : ''}
       ${failed && !isPaused ? `<button class="small" data-run-retry="${esc(run.id)}">Reintentar</button>` : ''}
-      <button class="small ghost" data-open-run="${esc(run.id)}">Ver panel completo</button>
+      <button class="small ghost" data-open-run="${esc(run.id)}">Detalles del equipo</button>
     </div>`;
 }
 
@@ -2425,8 +2437,18 @@ document.addEventListener('click', (e) => {
   if (resume) return api('POST', `/api/chats/${resume.dataset.resumeChat}/resume`).catch((err) => alert(err.message));
   const chatReview = e.target.closest('[data-chat-review]');
   if (chatReview) return openReview('chats', chatReview.dataset.chatReview);
+  const chatFiles = e.target.closest('[data-chat-files]');
+  if (chatFiles && state.chat?.id === chatFiles.dataset.chatFiles) {
+    return openFiles(chatFiles.dataset.delivered === 'true' ? state.chat.repoPath : state.chat.worktree.path,
+      chatFiles.dataset.delivered === 'true' ? 'archivos del proyecto' : 'copia de la conversación');
+  }
   const review = e.target.closest('[data-run-review]');
   if (review) return openReview('runs', review.dataset.runReview);
+  const runFiles = e.target.closest('[data-run-files]');
+  if (runFiles) {
+    const run = state.runDetails.get(runFiles.dataset.runFiles);
+    if (run) return openFiles(run.repoPath, 'archivos del proyecto');
+  }
   const retry = e.target.closest('[data-run-retry]');
   if (retry) return retryTeamRun(state.runDetails.get(retry.dataset.runRetry));
   const pauseRun = e.target.closest('[data-run-pause]');

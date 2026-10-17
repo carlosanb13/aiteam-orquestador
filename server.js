@@ -101,7 +101,10 @@ orchestrator.on('log', (entry) => broadcast('log', entry));
 
 const chats = new ChatManager({
   onTeamTask: ({ repoPath, goal, agents, baseRef, autonomy }) =>
-    orchestrator.create({ repoPath, goal, agents, baseRef, autonomy, coordinator: agents[0], review: true }),
+    orchestrator.create({
+      repoPath, goal, agents, baseRef, autonomy, coordinator: agents[0], review: true,
+      sourceWorktree: [...chats.chats.values()].find((chat) => chat.worktree.branch === baseRef)?.worktree.path,
+    }),
 });
 chats.on('chat', (chat) => broadcast('chat', chat));
 chats.on('activity', (a) => broadcast('chat-activity', a));
@@ -512,6 +515,7 @@ const routes = [
       coordinator: old.coordinator, review: old.review, adversarial: old.adversarial,
       testCommand: old.testCommand, autoApprove: old.autoApprove,
       autonomy: old.autonomy,
+      sourceWorktree: old.sourceWorktree,
     });
     const chat = [...chats.chats.values()].find((c) => c.worktree?.branch === old.baseBranch);
     if (chat) chats.addMessage(chat, { from: 'system', kind: 'notice', text: 'El equipo vuelve a intentar la tarea. El intento anterior sigue guardado para consulta.', meta: { runId: run.id } });
