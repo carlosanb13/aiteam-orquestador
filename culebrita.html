@@ -55,9 +55,18 @@
     try { best = Number(localStorage.getItem('culebrita-best')) || 0; } catch (_) { /* El juego funciona sin almacenamiento. */ }
     bestEl.textContent = best;
 
+    const pauseBtn = document.querySelector('#pause');
+
     function draw() {
       ctx.fillStyle = '#1b1d22';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+      ctx.lineWidth = 1;
+      for (let i = 1; i < size; i++) {
+        const pos = i * cell;
+        ctx.beginPath(); ctx.moveTo(pos, 0); ctx.lineTo(pos, canvas.height); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, pos); ctx.lineTo(canvas.width, pos); ctx.stroke();
+      }
       ctx.fillStyle = '#ff6376';
       if (food) { ctx.beginPath(); ctx.arc((food[0] + .5) * cell, (food[1] + .5) * cell, cell * .36, 0, Math.PI * 2); ctx.fill(); }
       if (snake) snake.forEach(([x, y], i) => {
@@ -78,6 +87,8 @@
       clearInterval(timer);
       timer = null;
       running = false;
+      paused = false;
+      pauseBtn.textContent = 'Pausar';
       messageEl.textContent = message;
     }
 
@@ -113,6 +124,7 @@
       score = 0;
       scoreEl.textContent = score;
       turned = paused = false;
+      pauseBtn.textContent = 'Pausar';
       running = true;
       placeFood();
       messageEl.textContent = '¡Come los puntos rojos!';
@@ -131,19 +143,25 @@
     function togglePause() {
       if (!running) return;
       paused = !paused;
+      pauseBtn.textContent = paused ? 'Reanudar' : 'Pausar';
       if (paused) { clearInterval(timer); timer = null; messageEl.textContent = 'Pausa'; }
       else { messageEl.textContent = '¡Sigue jugando!'; timer = setInterval(tick, 115); }
     }
 
     document.querySelector('#start').addEventListener('click', start);
-    document.querySelector('#pause').addEventListener('click', togglePause);
+    pauseBtn.addEventListener('click', togglePause);
     document.querySelectorAll('[data-dir]').forEach(button => button.addEventListener('click', () => turn(button.dataset.dir)));
     document.addEventListener('keydown', event => {
-      const keys = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', w: 'up', s: 'down', a: 'left', d: 'right' };
+      const keys = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', w: 'up', s: 'down', a: 'left', d: 'right', W: 'up', S: 'down', A: 'left', D: 'right' };
       const name = keys[event.key];
       if (name || event.code === 'Space') event.preventDefault();
-      if (name) turn(name);
-      else if (event.code === 'Space') togglePause();
+      if (name) {
+        if (!running) start();
+        turn(name);
+      } else if (event.code === 'Space') {
+        if (!running) start();
+        else togglePause();
+      }
     });
     let touchStart = null;
     canvas.addEventListener('touchstart', event => { touchStart = [event.changedTouches[0].clientX, event.changedTouches[0].clientY]; }, { passive: true });
