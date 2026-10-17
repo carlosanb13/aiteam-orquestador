@@ -1,0 +1,250 @@
+:root {
+  --bg-page: #fafafa;
+  --bg-card: #ffffff;
+  --bg-subtle: #f4f4f5;
+  --bg-hover: #e4e4e7;
+  --text-main: #09090b;
+  --text-muted: #52525b;
+  --border-color: #d4d4d8;
+  --border-strong: #18181b;
+  --btn-bg: #09090b;
+  --btn-text: #ffffff;
+  --btn-hover: #27272a;
+  --focus-ring: #09090b;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-page: #09090b;
+    --bg-card: #121215;
+    --bg-subtle: #18181b;
+    --bg-hover: #27272a;
+    --text-main: #fafafa;
+    --text-muted: #a1a1aa;
+    --border-color: #27272a;
+    --border-strong: #e4e4e7;
+    --btn-bg: #fafafa;
+    --btn-text: #09090b;
+    --btn-hover: #e4e4e7;
+    --focus-ring: #fafafa;
+    --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.4);
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background-color: var(--bg-page);
+  color: var(--text-main);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.team-demo {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+header {
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 1rem;
+}
+
+h1 {
+  margin: 0 0 0.25rem 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  color: var(--text-main);
+}
+
+header p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+}
+
+.task-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.task-input {
+  flex: 1;
+  min-height: 2.75rem;
+  padding: 0.625rem 0.875rem;
+  font: inherit;
+  font-size: 1rem;
+  color: var(--text-main);
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.task-input::placeholder {
+  color: var(--text-muted);
+}
+
+.task-add {
+  min-height: 2.75rem;
+  padding: 0.625rem 1.25rem;
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--btn-text);
+  background-color: var(--btn-bg);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 0.15s ease, transform 0.1s ease;
+}
+
+.task-add:hover {
+  background-color: var(--btn-hover);
+}
+
+.task-add:active {
+  transform: translateY(1px);
+}
+
+.task-input:focus-visible,
+.task-add:focus-visible,
+.task-toggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.task-count {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.task-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.task-item {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.task-item:hover {
+  border-color: var(--border-strong);
+}
+
+.task-label {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 44px;
+  padding: 0.625rem 0.875rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.task-toggle {
+  width: 1.25rem;
+  height: 1.25rem;
+  margin: 0;
+  flex-shrink: 0;
+  cursor: pointer;
+  accent-color: var(--text-main);
+}
+
+.task-text {
+  flex: 1;
+  font-size: 1rem;
+  color: var(--text-main);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  transition: color 0.15s ease;
+}
+
+.task-item.is-done {
+  background-color: var(--bg-subtle);
+}
+
+.task-item.is-done .task-text {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.task-empty {
+  margin: 0;
+  padding: 2rem 1rem;
+  text-align: center;
+  color: var(--text-muted);
+  background-color: var(--bg-subtle);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: 0.9375rem;
+}
+
+footer {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+@media (min-width: 640px) {
+  .team-demo {
+    padding: 2.5rem 1.5rem;
+  }
+
+  h1 {
+    font-size: 1.875rem;
+  }
+
+  .task-form {
+    flex-direction: row;
+    align-items: stretch;
+  }
+
+  .task-add {
+    white-space: nowrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
