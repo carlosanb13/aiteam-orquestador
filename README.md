@@ -134,6 +134,15 @@ npm run mock       # modo simulación: no llama a ninguna IA, para probar la int
 
 > Puedes usar AITeam para mejorar AITeam: añade esta misma carpeta como proyecto. Las IAs trabajan en una copia aparte, así que la app sigue funcionando; cuando te guste el resultado, fusiona la rama y reinicia.
 
+## Primera prueba real
+
+1. En **Equipo y uso**, pulsa **Probar** para comprobar que la IA elegida responde con tu sesión iniciada.
+2. Añade un repositorio git como proyecto y crea un chat nuevo desde ese proyecto.
+3. Pide un cambio pequeño y concreto, por ejemplo: «Añade una línea al README que explique para qué sirve este proyecto».
+4. Abre **Revisar cambios** y examina el diff del archivo. Si hace falta, usa **Pedir cambios** antes de aceptarlo.
+5. Cuando el resultado te convenza, pulsa **Aplicar al proyecto** y comprueba el cambio en tu repositorio.
+6. Si el cambio afecta al servidor de AITeam, reinícialo desde **Ajustes** para probar la versión aplicada.
+
 ## Permisos
 
 | Nivel | Qué pueden hacer las IAs | Cómo se aplica |
