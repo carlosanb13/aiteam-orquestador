@@ -1,5 +1,23 @@
 # AITeam
 
+> **Qué es:** una aplicación de escritorio que pone a trabajar juntas, como un equipo, a varias inteligencias artificiales de programación (Claude, ChatGPT/Codex y Antigravity).
+> **Para quién:** personas que ya pagan alguna de esas suscripciones y quieren aprovecharlas a la vez en sus proyectos, sin pagar aparte por cada uso.
+> **Cómo se usa:** le escribes (o le dictas) lo que quieres en un chat, las IAs se reparten el trabajo, se revisan entre sí y tú decides qué cambios se quedan.
+
+**[Aquí irán capturas de pantalla]**
+
+> Proyecto independiente, no afiliado a Anthropic, OpenAI ni Google. Los nombres de los productos pertenecen a sus dueños. Revisa los términos de uso de cada proveedor antes de usar tus suscripciones con herramientas de terceros.
+
+## Estado del proyecto
+
+AITeam es un **proyecto personal en desarrollo**, hecho para aprender y como pieza de portafolio. Funciona en mi PC con Windows 11 y se usa a diario para desarrollarse a sí mismo, pero no es un producto terminado: puede tener errores, cambiar sin aviso y no se ha probado en macOS ni Linux. Úsalo con proyectos de prueba o con copias de seguridad.
+
+## Cómo se desarrolló
+
+Este proyecto se desarrolló con herramientas de inteligencia artificial bajo mi dirección. Mi aporte es la idea, los requisitos, las pruebas y las decisiones de diseño. Buena parte del código lo escribieron las propias IAs (Claude Code, Codex y Antigravity), incluso desde dentro de AITeam, y yo revisé y aprobé cada cambio.
+
+## Descripción
+
 **Tus IAs trabajando como un equipo.** AITeam junta en una sola app las suscripciones que ya pagas (**Claude Pro**, **ChatGPT Plus** y **Google AI Pro**) a través de sus CLIs oficiales (Claude Code, Codex CLI y Antigravity CLI). Hablan entre ellas, se reparten el trabajo según en qué destaca cada una, se revisan y se pasan el relevo cuando a una se le acaba la cuota.
 
 AITeam es el **orquestador**: las capacidades (programar, ejecutar comandos, instalar dependencias, buscar en la web, usar sus servidores MCP…) las aporta cada IA con su propio CLI. AITeam las conecta, les da contexto compartido y coordina el trabajo.
@@ -112,7 +130,7 @@ Las funciones se seleccionaron a partir de la documentación disponible de Orca 
 ## Acceso directo (Windows)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File launchercrear-accesos.ps1
+powershell -ExecutionPolicy Bypass -File launcher\crear-accesos.ps1
 ```
 
 Crea **AITeam** en el escritorio y en el menú Inicio. Al abrirlo arranca el servidor en segundo plano (sin ventanas de consola) si no está en marcha, y abre la app en su propia ventana. Para tenerlo en la barra de tareas: clic derecho sobre el acceso → *Mostrar más opciones* → *Anclar a la barra de tareas* (o, con la app abierta, clic derecho en su icono de la barra → *Anclar*). Para apagarlo: **Ajustes → Apagar**. El registro del servidor queda en `data/servidor.log`.
@@ -164,6 +182,18 @@ Límites conocidos, comprobados en Windows: ningún nivel salvo *Protegido* en C
 - En Windows, Codex se ejecuta con el sandbox no elevado (`windows.sandbox=unelevated`), porque el elevado no puede escribir en las copias de trabajo. No se cambia tu configuración global.
 - Las copias de trabajo se crean junto a tu proyecto, en `../.aiteam-<proyecto>/`.
 - Historial, ajustes y datos de uso se guardan en `data/` (no se versiona).
+
+## Limitaciones conocidas
+
+- **Permisos:** AITeam elige el nivel (*Protegido*, *Comandos en el proyecto* o *Control total*) por conversación y por tarea, pero **no intercepta una por una** las acciones internas de cada CLI para pedirte aprobación. Ningún nivel, salvo *Protegido* en Claude y Antigravity, impide que un comando escriba fuera de la carpeta del proyecto.
+- **Windows y Codex:** el sandbox de Codex en Windows (modo *unelevated*, el único que funciona en las copias de trabajo) no bloquea la red ni la escritura fuera de la carpeta; en *Comandos en el proyecto* AITeam compensa deteniendo a la IA si intenta instalar algo, pero es una vigilancia por patrones, no un aislamiento real.
+- **Solo uso local:** el servidor escucha únicamente en `127.0.0.1` y **no tiene usuarios ni contraseña**. No lo expongas a internet (por ejemplo, con túneles como Cloudflare Tunnel o ngrok): quien llegue a él podría dar órdenes a tus IAs.
+- **Plataforma:** el acceso directo, los iconos de la barra de tareas y las notificaciones son específicos de Windows. No se ha probado en macOS ni Linux.
+- **Cuotas:** Antigravity no informa de su uso; solo se cuentan las peticiones que hace AITeam. Los porcentajes de Claude y Codex se leen de datos que esos CLIs no documentan y pueden dejar de funcionar si cambian.
+- **Dependencia de los CLIs:** AITeam lee la salida de Claude Code, Codex CLI y Antigravity CLI. Si un proveedor cambia su formato o sus opciones, la integración puede romperse hasta adaptarla.
+- **Extensiones:** los servidores MCP por proyecto solo llegan a Claude y Codex; Antigravity todavía no los recibe desde AITeam. Los conectores de otras IAs no conservan sesión entre turnos.
+- **Pruebas:** las pruebas automáticas (`npm test`) cubren utilidades internas, permisos y recuperación; el flujo completo con las IAs reales se ha probado a mano.
+- **Marcas de terceros:** la interfaz incluye logotipos de servicios de IA (ver [docs/brand-assets.md](docs/brand-assets.md)) solo para identificarlos. Si los usas o redistribuyes, revisa las normas de marca de cada empresa.
 
 ## Estructura
 
