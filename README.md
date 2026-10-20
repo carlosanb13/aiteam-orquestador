@@ -219,3 +219,7 @@ test/                  pruebas automáticas con node:test
 public/                interfaz web
 ```
 
+
+## Licencia
+
+Código bajo licencia [MIT](LICENSE): puedes usarlo, copiarlo y modificarlo, también con fines comerciales, siempre que conserves el aviso de copyright y de licencia. Los logotipos y nombres de productos de terceros no están cubiertos por esta licencia y pertenecen a sus dueños.
