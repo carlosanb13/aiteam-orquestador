@@ -4,8 +4,6 @@
 > **Para quién:** personas que ya pagan alguna de esas suscripciones y quieren aprovecharlas a la vez en sus proyectos, sin pagar aparte por cada uso.
 > **Cómo se usa:** le escribes (o le dictas) lo que quieres en un chat, las IAs se reparten el trabajo, se revisan entre sí y tú decides qué cambios se quedan.
 
-**[Aquí irán capturas de pantalla]**
-
 > Proyecto independiente, no afiliado a Anthropic, OpenAI ni Google. Los nombres de los productos pertenecen a sus dueños. Revisa los términos de uso de cada proveedor antes de usar tus suscripciones con herramientas de terceros.
 
 ## Estado del proyecto
@@ -14,7 +12,7 @@ AITeam es un **proyecto personal en desarrollo**, hecho para aprender y como pie
 
 ## Cómo se desarrolló
 
-Este proyecto se desarrolló con herramientas de inteligencia artificial bajo mi dirección. Mi aporte es la idea, los requisitos, las pruebas y las decisiones de diseño. Buena parte del código lo escribieron las propias IAs (Claude Code, Codex y Antigravity), incluso desde dentro de AITeam, y yo revisé y aprobé cada cambio.
+Este proyecto se desarrolló con herramientas de inteligencia artificial bajo mi dirección. Mi aporte es la idea, los requisitos, las pruebas y las decisiones de diseño. Buena parte del código lo escribieron las propias IAs (Claude Code, Codex y Antigravity), incluso desde dentro de AITeam, y yo pruebo el resultado y decido qué cambios se quedan.
 
 ## Descripción
 
@@ -115,7 +113,7 @@ Los permisos de comandos individuales dentro de un CLI dependen de ese proveedor
 
 Las preguntas al usuario esperan hasta cinco minutos y, al vencer, el agente continúa con su propio criterio. Las escaladas esperan hasta cinco minutos y continúan por defecto; ambos tiempos se ajustan con `bus.askTimeoutMs` y `bus.gateTimeoutMs` en la configuración. Las preguntas y decisiones se responden mediante la API del bus.
 
-Las funciones se seleccionaron a partir de la documentación disponible de Orca y OpenCode. Ahora hay comprobaciones acotadas con REA de [Orca](docs/rea/orca-real-analysis.md) y [OpenCode](docs/rea/opencode.md). El [inventario anterior](docs/rea/orca.md) conserva las hipótesis y límites de la primera revisión de Orca.
+Las funciones se seleccionaron a partir de la documentación disponible de Orca y OpenCode. En `docs/rea/` están las notas de ese estudio: un [inventario de funciones de Orca](docs/rea/orca.md) con cómo aplicarlas en AITeam, y dos análisis hechos con la herramienta REA, uno de la [aplicación de Orca instalada](docs/rea/orca-real-analysis.md) y otro de [cuatro archivos del código de OpenCode](docs/rea/opencode.md).
 
 
 
