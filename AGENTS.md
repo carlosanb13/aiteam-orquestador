@@ -47,8 +47,7 @@ aiteam/
     ├── index.html         # Marcado semántico, diálogos nativos <dialog>
     ├── app.js             # Lógica cliente, SSE, compositor, revisión y Live Error Doctor
     ├── style.css          # Sistema de diseño sobrio, monocromático, temas claro y oscuro
-    ├── icons.js           # Emblemas vectoriales y utilidades de renderizado SVG
-    └── agent-icons.js     # Catálogo oficial de logotipos originales (SVG y base64) de 45 IAs
+    └── icons.js           # Iconos de línea y emblemas genéricos de las IAs (círculo de color con su inicial)
 ```
 
 ---
@@ -76,8 +75,8 @@ Cuando trabajes modificando AITeam o el proyecto del usuario, cumple rigurosamen
 
 ### E. Estética Visual: Monocromía y Claridad
 - Toda la interfaz mantiene una estética limpia, monocromática y profesional (blanco, gris y negro puro `currentColor`).
-- Los logotipos de las 45 IAs deben verse en estilo original en blanco y negro, adaptándose con escala de grises y contraste perfecto a los modos oscuro y claro.
-- Solo se utilizan colores en badges funcionales de estado semántico (`ok`, `err`, `warn`).
+- Cada IA se representa con un icono genérico propio (un círculo de color con su inicial). No añadas logotipos de marcas de terceros: son marcas registradas de sus dueños.
+- Solo se utilizan colores en badges funcionales de estado semántico (`ok`, `err`, `warn`) y en el círculo que identifica a cada IA.
 
 ---
 

@@ -58,7 +58,7 @@ Botón de micrófono (o **Ctrl+M**) en el chat, en el formulario de tareas y al 
 Te avisa cuando una IA termina de responder, el equipo propone un reparto o algo falla, con un sonido suave. Con la ventana abierta usa las notificaciones de la ventana; con la ventana cerrada, notificaciones de Windows (el servidor sigue en segundo plano).
 
 ### 🎨 Apariencia
-Temas **OLED** (negro puro), **Oscuro**, **Medianoche** y **Claro**, con seis colores de acento (Ajustes → Apariencia). Emblemas propios para cada IA (no son los logos oficiales, que son marcas registradas).
+Temas **OLED** (negro puro), **Oscuro**, **Medianoche** y **Claro**, con seis colores de acento (Ajustes → Apariencia). Cada IA se identifica con un icono propio y genérico: un círculo de color con su inicial. La app no incluye logotipos de terceros.
 
 ### ⚡ Tareas de equipo (en paralelo)
 1. **Planificar**: una IA coordinadora divide el objetivo en subtareas con dependencias.
@@ -193,7 +193,7 @@ Límites conocidos, comprobados en Windows: ningún nivel salvo *Protegido* en C
 - **Dependencia de los CLIs:** AITeam lee la salida de Claude Code, Codex CLI y Antigravity CLI. Si un proveedor cambia su formato o sus opciones, la integración puede romperse hasta adaptarla.
 - **Extensiones:** los servidores MCP por proyecto solo llegan a Claude y Codex; Antigravity todavía no los recibe desde AITeam. Los conectores de otras IAs no conservan sesión entre turnos.
 - **Pruebas:** las pruebas automáticas (`npm test`) cubren utilidades internas, permisos y recuperación; el flujo completo con las IAs reales se ha probado a mano.
-- **Marcas de terceros:** la interfaz incluye logotipos de servicios de IA (ver [docs/brand-assets.md](docs/brand-assets.md)) solo para identificarlos. Si los usas o redistribuyes, revisa las normas de marca de cada empresa.
+- **Nombres de terceros:** la interfaz menciona Claude, Codex/ChatGPT, Antigravity y otras herramientas solo para indicar con qué CLI se conecta; no incluye sus logotipos. Esos nombres son marcas de sus dueños.
 
 ## Estructura
 
@@ -222,4 +222,4 @@ public/                interfaz web
 
 ## Licencia
 
-Código bajo licencia [MIT](LICENSE): puedes usarlo, copiarlo y modificarlo, también con fines comerciales, siempre que conserves el aviso de copyright y de licencia. Los logotipos y nombres de productos de terceros no están cubiertos por esta licencia y pertenecen a sus dueños.
+Código bajo licencia [MIT](LICENSE): puedes usarlo, copiarlo y modificarlo, también con fines comerciales, siempre que conserves el aviso de copyright y de licencia. Los nombres de productos de terceros que aparecen en la app pertenecen a sus dueños y no están cubiertos por esta licencia.

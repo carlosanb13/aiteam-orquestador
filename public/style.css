@@ -532,10 +532,7 @@ main { overflow-y: auto; height: 100vh; }
 button .i { margin-right: 2px; }
 .icon-btn .i, .project-actions .i, #filesClose .i, #refreshUsage .i { margin: 0; }
 .emblem { display: inline-block; flex: none; border-radius: 28%; vertical-align: middle; }
-.brand-emblem { background: var(--text); border-radius: 0; -webkit-mask-position: center; mask-position: center; -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; }
-.brand-claude { -webkit-mask-image: url('/brands/claude.svg'); mask-image: url('/brands/claude.svg'); }
-.brand-openai { -webkit-mask-image: url('/brands/openai.svg'); mask-image: url('/brands/openai.svg'); }
-.brand-antigravity { -webkit-mask-image: url('/brands/antigravity.svg'); mask-image: url('/brands/antigravity.svg'); }
+.initial-emblem { display: inline-grid; place-items: center; border-radius: 50%; color: #fff; font-weight: 700; line-height: 1; letter-spacing: 0; user-select: none; }
 .user-emblem { display: inline-grid; place-items: center; background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
 .avatar { width: auto; height: auto; background: none; display: block; }
 .agent-tag .emblem { margin-right: 2px; }
@@ -1678,35 +1675,6 @@ main.welcome-active {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-}
-.emblem.custom-emblem,
-.emblem.mono-emblem {
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  color: var(--text);
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
-.orca-agent-icon .emblem {
-  background: transparent;
-  border: 0;
-  color: var(--text);
-}
-.emblem.orca-original-emblem {
-  display: inline-grid;
-  place-items: center;
-  border-radius: 6px;
-  background: transparent;
-}
-.emblem.orca-original-emblem img {
-  object-fit: contain;
-  filter: grayscale(1) contrast(1.15) brightness(0.95);
-  display: block;
-}
-:root[data-theme="oscuro"] .emblem.orca-original-emblem img,
-:root[data-theme="oled"] .emblem.orca-original-emblem img,
-:root[data-theme="medianoche"] .emblem.orca-original-emblem img {
-  filter: grayscale(1) invert(0.85) contrast(1.2);
 }
 
 #addAgentDlg.orca-agents-dlg {

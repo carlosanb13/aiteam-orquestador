@@ -338,7 +338,7 @@ async function mockInvoke(agentId, { prompt, cwd, mode, onEvent }) {
     return {
       ok: false,
       // AITEAM_MOCK_FAIL_KIND=network simula un corte de red en lugar de falta de cuota.
-      error: process.env.AITEAM_MOCK_FAIL_KIND === 'network' ? 'read tcp 192.168.1.61:55922: wsarecv: A connection attempt failed (simulación).' : "You've hit your usage limit (simulación).",
+      error: process.env.AITEAM_MOCK_FAIL_KIND === 'network' ? 'read tcp 192.0.2.10:55922: wsarecv: A connection attempt failed (simulación).' : "You've hit your usage limit (simulación).",
     };
   }
   let json;

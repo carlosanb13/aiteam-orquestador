@@ -1,4 +1,4 @@
-import { icon, emblem, userAvatar, iconizeLine } from './icons.js';
+import { icon, emblem, userAvatar, iconizeLine, registerAgents } from './icons.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) =>
@@ -103,6 +103,7 @@ let editingCmdAgentId = null;
 async function loadAgents(refresh = false) {
   const data = await api('GET', `/api/agents${refresh ? '?refresh' : ''}`);
   state.agents = data.agents;
+  registerAgents(state.agents);
   state.defaultAgent = data.defaultAgent || 'claude';
   $('#mockBadge').hidden = !data.mock;
   renderChips();
