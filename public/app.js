@@ -186,7 +186,7 @@ function renderOrcaCatalog() {
     html += `
       <div class="orca-sec-header">
         <span>Instalados en este equipo</span>
-        <span class="orca-count-pill">${installedList.length} agents</span>
+        <span class="orca-count-pill">${installedList.length} agentes</span>
       </div>
       <div class="orca-sec-group">${installedList.map(renderOrcaRow).join('')}</div>`;
   }
@@ -194,7 +194,7 @@ function renderOrcaCatalog() {
     html += `
       <div class="orca-sec-header">
         <span>Disponible para instalar</span>
-        <span class="orca-count-pill">${availableList.length} agents</span>
+        <span class="orca-count-pill">${availableList.length} agentes</span>
       </div>
       <div class="orca-sec-group">${availableList.map(renderOrcaRow).join('')}</div>`;
   }
@@ -4408,7 +4408,7 @@ function buildCmdPaletteItems() {
       title: 'Catálogo de Agentes (45 IAs estilo Orca)',
       subtitle: 'Activar o desactivar CLIs, personalizar comandos y elegir predeterminado',
       ico: 'cpu',
-      badge: '45 agents',
+      badge: '45 agentes',
       run: () => openOrcaCatalog(),
     },
   );

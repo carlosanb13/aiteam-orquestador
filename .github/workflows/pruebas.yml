@@ -1,0 +1,23 @@
+# Ejecuta las pruebas automáticas en cada cambio de main y en cada pull request.
+name: Pruebas
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pruebas:
+    # AITeam está pensado para Windows (accesos directos, notificaciones, sandbox de Codex).
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test

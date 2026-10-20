@@ -1,10 +1,57 @@
 # AITeam
 
+![Pruebas](https://github.com/carlosanb13/aiteam-orquestador/actions/workflows/pruebas.yml/badge.svg) ![Node.js 22](https://img.shields.io/badge/Node.js-22-339933) ![Licencia MIT](https://img.shields.io/badge/licencia-MIT-blue)
+
 > **Qué es:** una aplicación de escritorio que pone a trabajar juntas, como un equipo, a varias inteligencias artificiales de programación (Claude, ChatGPT/Codex y Antigravity).
 > **Para quién:** personas que ya pagan alguna de esas suscripciones y quieren aprovecharlas a la vez en sus proyectos, sin pagar aparte por cada uso.
 > **Cómo se usa:** le escribes (o le dictas) lo que quieres en un chat, las IAs se reparten el trabajo, se revisan entre sí y tú decides qué cambios se quedan.
 
 > Proyecto independiente, no afiliado a Anthropic, OpenAI ni Google. Los nombres de los productos pertenecen a sus dueños. Revisa los términos de uso de cada proveedor antes de usar tus suscripciones con herramientas de terceros.
+
+## Capturas
+
+*Capturas tomadas en modo simulación (`npm run mock`) con un proyecto de ejemplo: los mensajes de las IAs son de demostración, no respuestas reales.*
+
+**Chat de equipo:** le pides algo a una IA y ella misma delega en otra con una @mención.
+
+![Chat de equipo con delegación entre IAs](docs/capturas/chat-equipo.png)
+
+**Reparto de una tarea:** cada IA valora cada subtarea según sus fortalezas y tú apruebas el reparto antes de empezar.
+
+![Plan y reparto de subtareas con la valoración de cada IA](docs/capturas/reparto-tareas.png)
+
+**Revisión por archivo:** aceptas o rechazas cada cambio antes de aplicarlo a tu proyecto.
+
+![Revisión de cambios archivo por archivo](docs/capturas/revision-cambios.png)
+
+## Tecnologías
+
+- **Node.js 22** (módulos ES) sin frameworks: servidor HTTP propio y eventos en tiempo real con **Server-Sent Events**.
+- **JavaScript, HTML y CSS** sin compilación para la interfaz.
+- **Git worktrees** para que cada IA trabaje en una copia aislada del proyecto.
+- **CLIs oficiales** de Claude Code, Codex y Antigravity, controlados en modo no interactivo (salida JSON en streaming).
+- **sherpa-onnx + Whisper** para el dictado por voz local, sin enviar audio a internet.
+- **PowerShell** para el acceso directo, el icono de la barra de tareas y las notificaciones de Windows.
+- **node:test** y **GitHub Actions** para las pruebas automáticas.
+
+## Arquitectura en breve
+
+```
+Interfaz web (navegador)  ⇄  servidor local Node.js (127.0.0.1)  ⇄  CLIs de cada IA
+         chat, revisión            orquestador, chat, git,            Claude Code
+         de cambios, uso           permisos, uso, seguridad           Codex CLI
+                                          │                           Antigravity CLI
+                                          ▼
+                              copias aisladas (git worktree) por IA
+```
+
+1. Escribes una petición en el chat. El orquestador pide a cada IA un plan y una «puja» según sus fortalezas y su carga.
+2. Cada subtarea se ejecuta en su propia copia del proyecto (git worktree), en paralelo.
+3. Otra IA revisa el resultado (revisión cruzada) y, si lo activas, un «equipo rojo» busca fallos.
+4. Tú revisas los cambios archivo por archivo y decides cuáles se aplican al proyecto.
+5. Si a una IA se le acaba la cuota o falla la red, otra recoge el trabajo.
+
+El servidor solo acepta peticiones dirigidas a `127.0.0.1`/`localhost` (protección contra *DNS rebinding*) y solo acepta acciones enviadas desde la propia app.
 
 ## Estado del proyecto
 
@@ -76,7 +123,7 @@ En la barra lateral ves cuánto te queda de cada una:
 
 - **Claude**: ventana de 5 h y semanal (de los eventos de límites que emite Claude Code).
 - **ChatGPT/Codex**: ventana de 5 h y semanal (de los registros locales de Codex).
-- **Gemini**: su CLI no expone la cuota; se muestran las peticiones de hoy.
+- **Antigravity**: su CLI no expone la cuota; se muestran las peticiones de hoy.
 
 ### 📁 Proyectos y archivos
 Barra lateral por proyectos con sus conversaciones y tareas, y un explorador de archivos con visor (del proyecto, de la copia de una conversación o del resultado integrado de una tarea).
@@ -202,6 +249,8 @@ src/chat.js            chat de equipo: menciones, delegación entre IAs, relevo
 src/orchestrator.js    tareas de equipo: planificar, negociar, paralelo, revisar, equipo rojo, integrar
 src/prompts.js         instrucciones que recibe cada IA en cada fase
 src/usage.js           uso de sesión y semanal de cada suscripción
+src/permissions.js     niveles de permisos de cada IA
+src/security.js        comprobación de Host y Origin de las peticiones
 src/projects.js        proyectos y explorador de archivos
 src/git.js             worktrees, commits y fusiones
 src/bus.js             hilos, preguntas y puertas de decisión

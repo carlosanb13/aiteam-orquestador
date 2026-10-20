@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="AITeam, monograma AI conectado">
-  <rect width="512" height="512" rx="108" fill="#141820"/>
-  <g fill="none" stroke="#f2efe9" stroke-linecap="square" stroke-linejoin="miter">
-    <path d="M112 373 211 143c7-17 19-17 26 0l99 230" stroke-width="45"/>
-    <path d="M387 142v231" stroke-width="45"/>
-  </g>
-  <path d="M166 287h221" fill="none" stroke="#f27b65" stroke-width="27" stroke-linecap="square"/>
-</svg>

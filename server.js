@@ -20,6 +20,7 @@ import { LEVEL_INFO, LEVELS } from './src/permissions.js';
 import * as Speech from './src/speech.js';
 import { watchForNotifications } from './src/notify.js';
 import { loadConfig, saveConfig } from './src/config.js';
+import { isAllowedHost, isAllowedOrigin, parseRequestUrl } from './src/security.js';
 
 const PORT = Number(process.env.PORT) || 4317;
 const HOST = '127.0.0.1';
@@ -616,10 +617,15 @@ function serveStatic(req, res, url) {
 }
 
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  // Solo se aceptan peticiones de la propia app (evita que otra web local dispare acciones).
-  const origin = req.headers.origin;
-  if (req.method !== 'GET' && origin && origin !== `http://${HOST}:${PORT}` && origin !== `http://localhost:${PORT}`) {
+  // Solo se atienden peticiones dirigidas a la propia app: protege también las lecturas (GET) frente a DNS rebinding.
+  if (!isAllowedHost(req.headers.host, PORT)) {
+    res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('Host no permitido.');
+  }
+  const url = parseRequestUrl(req.url, PORT);
+  if (!url) return send(res, 400, { error: 'URL no válida.' });
+  // Las acciones (POST, PUT, PATCH, DELETE) solo se aceptan desde la propia app (evita que otra web las dispare).
+  if (req.method !== 'GET' && !isAllowedOrigin(req.headers.origin, PORT)) {
     return send(res, 403, { error: 'Origen no permitido.' });
   }
   for (const [method, pattern, handler] of routes) {

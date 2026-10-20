@@ -41,7 +41,7 @@ aiteam/
 │   ├── routes-commands.js # Modos, comandos personalizados y reglas dinámicas
 │   ├── routes-snapshots.js# Snapshots y reversión turno a turno
 │   ├── routes-terminal.js # Terminal aislada y extensiones MCP (Model Context Protocol)
-│   ├── speech.js          # Transcripción local de voz (Whisper / whisper.cpp)
+│   ├── speech.js          # Transcripción local de voz (Whisper con sherpa-onnx)
 │   └── usage.js           # Monitor de límites de uso y cuotas de IA
 └── public/                # Frontend web en Vanilla JS + CSS3 nativo
     ├── index.html         # Marcado semántico, diálogos nativos <dialog>

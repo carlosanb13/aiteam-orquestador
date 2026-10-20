@@ -1,7 +1,7 @@
 {
   "name": "aiteam",
   "version": "0.1.0",
-  "description": "AITeam varias IAs (Claude Code, Codex, Gemini CLI) para que se repartan tareas, trabajen en paralelo y se revisen entre sí.",
+  "description": "Orquestador local que coordina Claude Code, Codex CLI y Antigravity CLI como un equipo: se reparten tareas, trabajan en paralelo y se revisan entre sí.",
   "license": "MIT",
   "type": "module",
   "private": true,
