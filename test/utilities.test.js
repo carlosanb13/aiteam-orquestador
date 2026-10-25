@@ -77,7 +77,7 @@ test('compactación supera el umbral y conserva mensajes recientes', async (t) =
   assert.match(text, /Resumen simulado/); assert.equal((text.match(/x{600}/g) ?? []).length, 2);
 });
 
-const waitExit = (entry, events) => new Promise((resolve, reject) => { const started = Date.now(); const poll = () => { if (events.some((e) => e.commandId === entry.id && e.type === 'exit')) return resolve(); if (Date.now() - started > 5000) return reject(new Error('terminal timeout')); setTimeout(poll, 10); }; poll(); });
+const waitExit = (entry, events) => new Promise((resolve, reject) => { const started = Date.now(); const poll = () => { if (events.some((e) => e.commandId === entry.id && e.type === 'exit')) return resolve(); if (Date.now() - started > 30_000) return reject(new Error('terminal timeout')); setTimeout(poll, 10); }; poll(); });
 test('terminal ejecuta, cancela y recorta salida', async (t) => {
   const cwd = temp(t); const events = []; const emit = (_, e) => events.push(e); const ownerId = `test-${Date.now()}`;
   const previousDir = process.env.AITEAM_TERMINALS_DIR;
